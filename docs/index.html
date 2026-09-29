@@ -104,6 +104,10 @@
       <input type="password" id="twelveKeyInput" placeholder="Pega tu API key aqui" />
       <p class="hint">Gratis en <a href="https://twelvedata.com/" target="_blank">twelvedata.com</a> (registrate y copia tu API key del dashboard)</p>
 
+      <label for="groqKeyInput">API Key de Groq (respaldo si Gemini falla)</label>
+      <input type="password" id="groqKeyInput" placeholder="Pega tu API key aqui (opcional pero recomendado)" />
+      <p class="hint">Gratis en <a href="https://console.groq.com/keys" target="_blank">console.groq.com/keys</a>. Si Gemini da error (alta demanda, limite, etc.) la app reintenta automaticamente con Groq.</p>
+
       <div class="settings-buttons">
         <button id="saveSettingsBtn" class="primary-btn">Guardar</button>
         <button id="backBtn" class="secondary-btn">Volver</button>

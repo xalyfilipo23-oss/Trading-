@@ -2,7 +2,7 @@
 // (requisito tecnico de Chrome/Safari para el boton "Agregar a pantalla de inicio").
 // No hace caching agresivo para evitar que veas datos de mercado viejos.
 
-const CACHE_NAME = 'smc-copilot-pwa-v1';
+const CACHE_NAME = 'smc-copilot-pwa-v2';
 const APP_SHELL = ['./index.html', './app.js', './styles.css', './manifest.json'];
 
 self.addEventListener('install', (event) => {
@@ -13,7 +13,11 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
 });
 
 self.addEventListener('fetch', (event) => {

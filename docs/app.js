@@ -5,6 +5,8 @@
 // mientras la app este abierta.
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+const GROQ_BASE = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
 const TWELVEDATA_BASE = 'https://api.twelvedata.com/time_series';
 
 // ---------------------------------------------------------------
@@ -55,14 +57,16 @@ function getSettings() {
   return {
     geminiKey: localStorage.getItem('geminiKey') || '',
     model: localStorage.getItem('model') || 'gemini-3.6-flash',
-    twelveKey: localStorage.getItem('twelveKey') || ''
+    twelveKey: localStorage.getItem('twelveKey') || '',
+    groqKey: localStorage.getItem('groqKey') || ''
   };
 }
 
-function saveSettings(geminiKey, model, twelveKey) {
+function saveSettings(geminiKey, model, twelveKey, groqKey) {
   localStorage.setItem('geminiKey', geminiKey);
   localStorage.setItem('model', model);
   localStorage.setItem('twelveKey', twelveKey);
+  localStorage.setItem('groqKey', groqKey);
 }
 
 function getHistory() {
@@ -150,6 +154,50 @@ async function analyzeCandles(promptText, apiKey, model) {
     throw new Error(blockReason ? `Respuesta bloqueada (${blockReason})` : 'La API no devolvio contenido.');
   }
 
+  return parseModelJson(rawContent);
+}
+
+// ---------------------------------------------------------------
+// ANALISIS CON GROQ (respaldo si Gemini falla)
+// ---------------------------------------------------------------
+async function analyzeCandlesGroq(promptText, apiKey) {
+  const body = {
+    model: GROQ_MODEL,
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: promptText }
+    ],
+    temperature: 0.3,
+    response_format: { type: 'json_object' }
+  };
+
+  const response = await fetch(GROQ_BASE, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`Error de Groq (${response.status}): ${errText || response.statusText}`);
+  }
+
+  const data = await response.json();
+  const rawContent = data?.choices?.[0]?.message?.content;
+  if (!rawContent) {
+    throw new Error('Groq no devolvio contenido.');
+  }
+
+  return parseModelJson(rawContent);
+}
+
+// ---------------------------------------------------------------
+// PARSEO COMPARTIDO DE LA RESPUESTA JSON (Gemini o Groq)
+// ---------------------------------------------------------------
+function parseModelJson(rawContent) {
   let cleaned = rawContent.trim();
   cleaned = cleaned.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '');
 
@@ -177,6 +225,26 @@ async function analyzeCandles(promptText, apiKey, model) {
 }
 
 // ---------------------------------------------------------------
+// ANALISIS CON FALLBACK AUTOMATICO: Gemini primero, Groq si falla
+// ---------------------------------------------------------------
+async function analyzeWithFallback(promptText, settings, statusFn) {
+  try {
+    return { result: await analyzeCandles(promptText, settings.geminiKey, settings.model), usedProvider: 'Gemini' };
+  } catch (geminiErr) {
+    console.log('SMC Copilot: Gemini fallo, intentando con Groq...', geminiErr);
+    if (!settings.groqKey) {
+      throw geminiErr; // sin key de respaldo, propaga el error original
+    }
+    if (statusFn) statusFn('Gemini no respondio, reintentando con Groq...', '');
+    try {
+      return { result: await analyzeCandlesGroq(promptText, settings.groqKey), usedProvider: 'Groq' };
+    } catch (groqErr) {
+      throw new Error(`Gemini fallo (${geminiErr.message}) y Groq tambien fallo (${groqErr.message})`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------
 // UI
 // ---------------------------------------------------------------
 const mainView = document.getElementById('mainView');
@@ -192,6 +260,7 @@ const zoneText = document.getElementById('zoneText');
 const geminiKeyInput = document.getElementById('geminiKeyInput');
 const modelSelect = document.getElementById('modelSelect');
 const twelveKeyInput = document.getElementById('twelveKeyInput');
+const groqKeyInput = document.getElementById('groqKeyInput');
 const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 const settingsStatus = document.getElementById('settingsStatus');
 const instrumentSelect = document.getElementById('instrumentSelect');
@@ -304,7 +373,11 @@ async function runAnalysis({ silent = false } = {}) {
     const promptText = buildMultiTimeframeText(symbol, candles1h, candles15m, candles5m);
 
     if (!silent) setStatus('Analizando 1H (contexto) + 15M (zona) + 5M (gatillo)...', '');
-    const result = await analyzeCandles(promptText, settings.geminiKey, settings.model);
+    const { result, usedProvider } = await analyzeWithFallback(
+      promptText,
+      settings,
+      silent ? null : (msg, type) => setStatus(msg, type)
+    );
 
     displayResult(result);
     addToHistory({ ...result, timestamp: Date.now(), symbol });
@@ -314,7 +387,12 @@ async function runAnalysis({ silent = false } = {}) {
       notifyApto(result, symbol);
     }
 
-    if (!silent) setStatus('Analisis completo.', 'success');
+    if (!silent) {
+      setStatus(
+        usedProvider === 'Groq' ? 'Analisis completo (via Groq, respaldo).' : 'Analisis completo.',
+        'success'
+      );
+    }
   } catch (err) {
     if (!silent) setStatus(err.message || 'Error inesperado.', 'error');
     console.log('SMC Copilot error:', err);
@@ -372,6 +450,7 @@ settingsBtn.addEventListener('click', () => {
   geminiKeyInput.value = s.geminiKey;
   modelSelect.value = s.model;
   twelveKeyInput.value = s.twelveKey;
+  groqKeyInput.value = s.groqKey;
   showSettings();
 });
 
@@ -380,12 +459,13 @@ backBtn.addEventListener('click', showMain);
 saveSettingsBtn.addEventListener('click', () => {
   const geminiKey = geminiKeyInput.value.trim();
   const twelveKey = twelveKeyInput.value.trim();
+  const groqKey = groqKeyInput.value.trim();
   if (!geminiKey || !twelveKey) {
-    settingsStatus.textContent = 'Completa ambas API keys.';
+    settingsStatus.textContent = 'Completa Gemini y Twelve Data (obligatorias). Groq es opcional.';
     settingsStatus.className = 'status-msg error';
     return;
   }
-  saveSettings(geminiKey, modelSelect.value, twelveKey);
+  saveSettings(geminiKey, modelSelect.value, twelveKey, groqKey);
   settingsStatus.textContent = 'Guardado correctamente.';
   settingsStatus.className = 'status-msg success';
   setTimeout(() => { settingsStatus.textContent = ''; showMain(); }, 800);
