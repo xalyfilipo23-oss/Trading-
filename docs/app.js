@@ -5,8 +5,8 @@
 // mientras la app este abierta.
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const GROQ_BASE = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_MODEL = 'qwen/qwen3.8-27b:free';
 const TWELVEDATA_BASE = 'https://api.twelvedata.com/time_series';
 
 // ---------------------------------------------------------------
@@ -58,15 +58,15 @@ function getSettings() {
     geminiKey: localStorage.getItem('geminiKey') || '',
     model: localStorage.getItem('model') || 'gemini-3.6-flash',
     twelveKey: localStorage.getItem('twelveKey') || '',
-    groqKey: localStorage.getItem('groqKey') || ''
+    openrouterKey: localStorage.getItem('openrouterKey') || ''
   };
 }
 
-function saveSettings(geminiKey, model, twelveKey, groqKey) {
+function saveSettings(geminiKey, model, twelveKey, openrouterKey) {
   localStorage.setItem('geminiKey', geminiKey);
   localStorage.setItem('model', model);
   localStorage.setItem('twelveKey', twelveKey);
-  localStorage.setItem('groqKey', groqKey);
+  localStorage.setItem('openrouterKey', openrouterKey);
 }
 
 function getHistory() {
@@ -158,44 +158,45 @@ async function analyzeCandles(promptText, apiKey, model) {
 }
 
 // ---------------------------------------------------------------
-// ANALISIS CON GROQ (respaldo si Gemini falla)
+// ANALISIS CON OPENROUTER (respaldo si Gemini falla)
 // ---------------------------------------------------------------
-async function analyzeCandlesGroq(promptText, apiKey) {
+async function analyzeCandlesOpenRouter(promptText, apiKey) {
   const body = {
-    model: GROQ_MODEL,
+    model: OPENROUTER_MODEL,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: promptText }
     ],
-    temperature: 0.3,
-    response_format: { type: 'json_object' }
+    temperature: 0.3
   };
 
-  const response = await fetch(GROQ_BASE, {
+  const response = await fetch(OPENROUTER_BASE, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
+      'Authorization': `Bearer ${apiKey}`,
+      'HTTP-Referer': 'https://xalyfilipo23-oss.github.io/Trading-/',
+      'X-Title': 'SMC Copilot'
     },
     body: JSON.stringify(body)
   });
 
   if (!response.ok) {
     const errText = await response.text().catch(() => '');
-    throw new Error(`Error de Groq (${response.status}): ${errText || response.statusText}`);
+    throw new Error(`Error de OpenRouter (${response.status}): ${errText || response.statusText}`);
   }
 
   const data = await response.json();
   const rawContent = data?.choices?.[0]?.message?.content;
   if (!rawContent) {
-    throw new Error('Groq no devolvio contenido.');
+    throw new Error('OpenRouter no devolvio contenido.');
   }
 
   return parseModelJson(rawContent);
 }
 
 // ---------------------------------------------------------------
-// PARSEO COMPARTIDO DE LA RESPUESTA JSON (Gemini o Groq)
+// PARSEO COMPARTIDO DE LA RESPUESTA JSON (Gemini u OpenRouter)
 // ---------------------------------------------------------------
 function parseModelJson(rawContent) {
   let cleaned = rawContent.trim();
@@ -225,21 +226,21 @@ function parseModelJson(rawContent) {
 }
 
 // ---------------------------------------------------------------
-// ANALISIS CON FALLBACK AUTOMATICO: Gemini primero, Groq si falla
+// ANALISIS CON FALLBACK AUTOMATICO: Gemini primero, OpenRouter si falla
 // ---------------------------------------------------------------
 async function analyzeWithFallback(promptText, settings, statusFn) {
   try {
     return { result: await analyzeCandles(promptText, settings.geminiKey, settings.model), usedProvider: 'Gemini' };
   } catch (geminiErr) {
-    console.log('SMC Copilot: Gemini fallo, intentando con Groq...', geminiErr);
-    if (!settings.groqKey) {
+    console.log('SMC Copilot: Gemini fallo, intentando con OpenRouter...', geminiErr);
+    if (!settings.openrouterKey) {
       throw geminiErr; // sin key de respaldo, propaga el error original
     }
-    if (statusFn) statusFn('Gemini no respondio, reintentando con Groq...', '');
+    if (statusFn) statusFn('Gemini no respondio, reintentando con OpenRouter...', '');
     try {
-      return { result: await analyzeCandlesGroq(promptText, settings.groqKey), usedProvider: 'Groq' };
-    } catch (groqErr) {
-      throw new Error(`Gemini fallo (${geminiErr.message}) y Groq tambien fallo (${groqErr.message})`);
+      return { result: await analyzeCandlesOpenRouter(promptText, settings.openrouterKey), usedProvider: 'OpenRouter' };
+    } catch (orErr) {
+      throw new Error(`Gemini fallo (${geminiErr.message}) y OpenRouter tambien fallo (${orErr.message})`);
     }
   }
 }
@@ -260,7 +261,7 @@ const zoneText = document.getElementById('zoneText');
 const geminiKeyInput = document.getElementById('geminiKeyInput');
 const modelSelect = document.getElementById('modelSelect');
 const twelveKeyInput = document.getElementById('twelveKeyInput');
-const groqKeyInput = document.getElementById('groqKeyInput');
+const openrouterKeyInput = document.getElementById('openrouterKeyInput');
 const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 const settingsStatus = document.getElementById('settingsStatus');
 const instrumentSelect = document.getElementById('instrumentSelect');
@@ -389,7 +390,7 @@ async function runAnalysis({ silent = false } = {}) {
 
     if (!silent) {
       setStatus(
-        usedProvider === 'Groq' ? 'Analisis completo (via Groq, respaldo).' : 'Analisis completo.',
+        usedProvider === 'OpenRouter' ? 'Analisis completo (via OpenRouter, respaldo).' : 'Analisis completo.',
         'success'
       );
     }
@@ -450,7 +451,7 @@ settingsBtn.addEventListener('click', () => {
   geminiKeyInput.value = s.geminiKey;
   modelSelect.value = s.model;
   twelveKeyInput.value = s.twelveKey;
-  groqKeyInput.value = s.groqKey;
+  openrouterKeyInput.value = s.openrouterKey;
   showSettings();
 });
 
@@ -459,13 +460,13 @@ backBtn.addEventListener('click', showMain);
 saveSettingsBtn.addEventListener('click', () => {
   const geminiKey = geminiKeyInput.value.trim();
   const twelveKey = twelveKeyInput.value.trim();
-  const groqKey = groqKeyInput.value.trim();
+  const openrouterKey = openrouterKeyInput.value.trim();
   if (!geminiKey || !twelveKey) {
-    settingsStatus.textContent = 'Completa Gemini y Twelve Data (obligatorias). Groq es opcional.';
+    settingsStatus.textContent = 'Completa Gemini y Twelve Data (obligatorias). OpenRouter es opcional.';
     settingsStatus.className = 'status-msg error';
     return;
   }
-  saveSettings(geminiKey, modelSelect.value, twelveKey, groqKey);
+  saveSettings(geminiKey, modelSelect.value, twelveKey, openrouterKey);
   settingsStatus.textContent = 'Guardado correctamente.';
   settingsStatus.className = 'status-msg success';
   setTimeout(() => { settingsStatus.textContent = ''; showMain(); }, 800);
