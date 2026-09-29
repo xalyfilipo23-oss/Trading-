@@ -1,0 +1,108 @@
+SMC COPILOT PWA — INSTRUCCIONES (TABLET / CELULAR)
+=====================================================
+
+Esta version funciona en cualquier dispositivo con navegador (tablet,
+celular, computadora) SIN instalar nada desde una tienda de apps. Se
+instala directo desde el navegador, como cualquier pagina web, pero
+se comporta como una app en tu pantalla de inicio.
+
+DIFERENCIA CON LA EXTENSION DE CHROME
+-----------------------------------------
+Esta version NO le saca captura de pantalla a TradingView. En su
+lugar, pide directamente los PRECIOS REALES (velas OHLC) a un
+proveedor de datos de mercado, y esos numeros exactos se los pasa a
+la IA para el analisis SMC. Es igual o mas preciso que analizar una
+imagen, y funciona en cualquier dispositivo porque no depende de
+funciones exclusivas de extensiones de navegador.
+
+PASO 1 — Subir estos archivos a algun lugar accesible
+----------------------------------------------------------
+Para que tu tablet pueda abrir esta app, los archivos deben estar
+en algun servidor web (no puede ser un simple archivo local en
+algunos navegadores, por restricciones de seguridad). Las opciones
+mas faciles y gratuitas:
+
+  OPCION A (recomendada, mas facil): GitHub Pages
+  1. Crea una cuenta gratis en github.com si no tienes.
+  2. Crea un nuevo repositorio (puede ser privado).
+  3. Sube todos los archivos de esta carpeta (index.html, app.js,
+     styles.css, manifest.json, sw.js, la carpeta icons/).
+  4. Ve a Settings > Pages del repositorio, y activa GitHub Pages
+     apuntando a la rama principal.
+  5. Te va a dar una direccion tipo:
+     https://tu-usuario.github.io/nombre-repositorio/
+  6. Esa es la direccion que abres desde tu tablet.
+
+  OPCION B: Netlify Drop (aun mas simple, sin cuenta de GitHub)
+  1. Ve a https://app.netlify.com/drop desde tu computadora.
+  2. Arrastra la carpeta completa "smc-copilot-pwa" a la pagina.
+  3. Te da una direccion publica al instante (algo como
+     https://nombre-al-azar.netlify.app).
+  4. Esa es la direccion que abres desde tu tablet.
+
+(Si prefieres, dime cual opcion te gustaria usar y te ayudo con el
+detalle paso a paso de esa opcion especifica.)
+
+PASO 2 — Conseguir tus 2 API keys (ambas gratis)
+-----------------------------------------------------
+1. Google Gemini (para el analisis con IA):
+   - Ve a https://aistudio.google.com/apikey desde cualquier
+     dispositivo, inicia sesion con tu cuenta de Google.
+   - Crea una API key y copiala.
+
+2. Twelve Data (para los precios reales del mercado):
+   - Ve a https://twelvedata.com/ y crea una cuenta gratis.
+   - En tu dashboard (panel de control) vas a ver tu API key,
+     copiala.
+   - El plan gratuito tiene un limite de llamadas por minuto/dia.
+     IMPORTANTE: la app ahora pide 3 temporalidades (1H, 15M, 5M) en
+     cada analisis, para razonar de mayor a menor como un trader real
+     (contexto -> zona -> gatillo). Eso son 3 llamadas a Twelve Data
+     por cada ciclo de analisis, no 1. Con el Modo Automatico cada 15
+     minutos, son unas 12 llamadas por hora — revisa el limite de tu
+     plan gratuito de Twelve Data (usualmente 8 por minuto / 800 por
+     dia) para asegurarte que te alcanza para el intervalo que elijas.
+
+PASO 3 — Abrir la app en tu tablet e instalarla
+----------------------------------------------------
+1. Abre el navegador de tu tablet (Chrome, Safari, el que uses) y
+   entra a la direccion que te dio GitHub Pages o Netlify.
+2. Busca en el menu del navegador (usualmente el icono de tres
+   puntos, o el boton de compartir en iPhone/iPad) la opcion
+   "Agregar a pantalla de inicio" o "Instalar app".
+3. Confirma. Ahora deberias ver el icono de SMC Copilot en tu
+   pantalla de inicio, como cualquier otra app.
+
+PASO 4 — Configurar tus API keys dentro de la app
+------------------------------------------------------
+1. Abre la app desde el icono que instalaste.
+2. Toca el icono de engranaje (⚙) arriba a la derecha.
+3. Pega tu API key de Gemini y tu API key de Twelve Data.
+4. Toca "Guardar".
+
+PASO 5 — Usarla
+------------------
+1. Elige el instrumento (EUR/USD, XAU/USD para oro, etc.) y la
+   temporalidad de las velas.
+2. Para un analisis puntual: toca "Analizar ahora".
+3. Para que revise sola cada cierto tiempo: activa "Modo Automatico"
+   y elige el intervalo. La primera vez que lo actives, el navegador
+   te va a pedir permiso para mostrar notificaciones — dile que si,
+   sino no te va a poder avisar cuando encuentre un APTO.
+4. Deja la app abierta (puede estar en segundo plano en tu tablet,
+   usando otra app a la vez) y ella sigue revisando y avisandote.
+
+LIMITACION IMPORTANTE — LEELA CON CALMA
+--------------------------------------------
+El Modo Automatico SOLO funciona mientras la app este ABIERTA (aunque
+sea en segundo plano, minimizada). Si CIERRAS la app completamente
+(la deslizas para cerrarla de la lista de apps recientes) o apagas
+la tablet, el modo automatico se detiene y no te va a avisar de nada
+hasta que la vuelvas a abrir.
+
+Para que funcione de verdad "aunque este todo cerrado" (como una
+alarma real que suena sin que la app este abierta), se necesita un
+servidor en la nube que haga la revision por ti y te mande la
+notificacion desde afuera — eso es un paso mas grande, con mas
+configuracion (y probablemente algo de costo de hosting), que
+podemos construir mas adelante cuando quieras dar ese salto.

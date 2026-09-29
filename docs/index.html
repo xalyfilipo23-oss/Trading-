@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#131722" />
+  <title>SMC Copilot</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icons/icon192.png" />
+  <link rel="apple-touch-icon" href="icons/icon192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>SMC Copilot</h1>
+      <button id="settingsBtn" class="icon-btn" title="Configuracion">⚙</button>
+    </header>
+
+    <!-- VISTA PRINCIPAL -->
+    <div id="mainView">
+      <div class="field">
+        <label for="instrumentSelect">Instrumento</label>
+        <select id="instrumentSelect">
+          <option value="EUR/USD">EUR/USD</option>
+          <option value="XAU/USD">XAU/USD (Oro)</option>
+          <option value="GBP/USD">GBP/USD</option>
+          <option value="USD/JPY">USD/JPY</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Analisis multi-temporalidad</label>
+        <select id="timeframeSelect" style="display:none">
+          <option value="5min">5 minutos</option>
+          <option value="15min" selected>15 minutos</option>
+          <option value="1h">1 hora</option>
+        </select>
+        <div class="mtf-badge">1H (contexto) → 15M (zona) → 5M (gatillo)</div>
+      </div>
+
+      <div class="auto-mode-box">
+        <div class="auto-mode-header">
+          <span>Modo Automatico</span>
+          <label class="switch">
+            <input type="checkbox" id="autoModeToggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <select id="intervalSelect">
+          <option value="5">Cada 5 minutos</option>
+          <option value="15" selected>Cada 15 minutos</option>
+          <option value="30">Cada 30 minutos</option>
+        </select>
+        <p class="hint" id="autoModeHint">Apagado. Analiza manualmente con el boton de abajo.</p>
+        <p class="hint warn">⚠ Solo funciona mientras esta app este abierta (aunque sea en segundo plano). Si la cierras del todo, se detiene.</p>
+      </div>
+
+      <button id="analyzeBtn" class="primary-btn">Analizar ahora</button>
+
+      <div id="statusMsg" class="status-msg"></div>
+
+      <div id="resultBox" class="result-box hidden">
+        <div id="verdictBadge" class="verdict-badge"></div>
+        <div class="result-section">
+          <h3>Analisis</h3>
+          <p id="analysisText"></p>
+        </div>
+        <div class="result-section">
+          <h3>Zona / Direccion sugerida</h3>
+          <p id="zoneText"></p>
+        </div>
+        <div id="tradePlanBox" class="trade-plan hidden">
+          <h3>Plan de Trade</h3>
+          <div class="trade-row"><span>Gatillo:</span><span id="tpGatillo"></span></div>
+          <div class="trade-row"><span>Entrada:</span><span id="tpEntrada"></span></div>
+          <div class="trade-row"><span>Stop Loss:</span><span id="tpSL"></span></div>
+          <div class="trade-row"><span>Take Profit:</span><span id="tpTP"></span></div>
+          <div class="trade-row"><span>R:R real:</span><span id="tpRR"></span></div>
+        </div>
+      </div>
+
+      <div id="historyBox">
+        <h3>Historial reciente</h3>
+        <div id="historyList"></div>
+      </div>
+    </div>
+
+    <!-- VISTA DE CONFIGURACION -->
+    <div id="settingsView" class="hidden">
+      <h2>Configuracion</h2>
+
+      <label for="geminiKeyInput">API Key de Google Gemini</label>
+      <input type="password" id="geminiKeyInput" placeholder="Pega tu API key aqui" />
+      <p class="hint">Gratis en <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a></p>
+
+      <label for="modelSelect">Modelo</label>
+      <select id="modelSelect">
+        <option value="gemini-3.6-flash">gemini-3.6-flash (recomendado)</option>
+        <option value="gemini-3.7-flash">gemini-3.7-flash (mas nuevo)</option>
+      </select>
+
+      <label for="twelveKeyInput">API Key de Twelve Data (datos de mercado)</label>
+      <input type="password" id="twelveKeyInput" placeholder="Pega tu API key aqui" />
+      <p class="hint">Gratis en <a href="https://twelvedata.com/" target="_blank">twelvedata.com</a> (registrate y copia tu API key del dashboard)</p>
+
+      <div class="settings-buttons">
+        <button id="saveSettingsBtn" class="primary-btn">Guardar</button>
+        <button id="backBtn" class="secondary-btn">Volver</button>
+      </div>
+      <div id="settingsStatus" class="status-msg"></div>
+
+      <div class="install-hint">
+        <h3>Instalar como app</h3>
+        <p>Para agregar SMC Copilot a tu pantalla de inicio: abre el menu de tu navegador (⋮ o compartir) y busca "Agregar a pantalla de inicio" o "Instalar app".</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
