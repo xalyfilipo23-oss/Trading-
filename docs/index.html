@@ -112,6 +112,10 @@
     <div id="settingsView" class="hidden">
       <h2>Configuracion</h2>
 
+      <label for="claudeKeyInput">API Key de Claude / Anthropic (proveedor principal, de pago)</label>
+      <input type="password" id="claudeKeyInput" placeholder="sk-ant-... (opcional, pero es el que se usa primero si lo pones)" />
+      <p class="hint">Crea tu clave en <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com/settings/keys</a>. Es de pago por uso (no requiere suscripcion), y al tener tu propia clave con creditos, casi nunca da error de "alta demanda". Si la dejas vacia, la app usa Gemini como principal.</p>
+
       <label for="geminiKeyInput">API Key de Google Gemini</label>
       <input type="password" id="geminiKeyInput" placeholder="Pega tu API key aqui" />
       <p class="hint">Gratis en <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a></p>
@@ -126,9 +130,9 @@
       <input type="password" id="twelveKeyInput" placeholder="Pega tu API key aqui" />
       <p class="hint">Gratis en <a href="https://twelvedata.com/" target="_blank">twelvedata.com</a> (registrate y copia tu API key del dashboard)</p>
 
-      <label for="openrouterKeyInput">API Key de OpenRouter (respaldo si Gemini falla)</label>
+      <label for="openrouterKeyInput">API Key de OpenRouter (ultimo respaldo, gratis)</label>
       <input type="password" id="openrouterKeyInput" placeholder="Pega tu API key aqui (opcional pero recomendado)" />
-      <p class="hint">Gratis, sin tarjeta, en <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>. Si Gemini da error (alta demanda, limite, etc.) la app reintenta automaticamente con OpenRouter.</p>
+      <p class="hint">Gratis, sin tarjeta, en <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>. Orden de intento: Claude (si lo configuraste) → Gemini → OpenRouter. Solo pasa al siguiente si el anterior da error.</p>
 
       <div class="settings-buttons">
         <button id="saveSettingsBtn" class="primary-btn">Guardar</button>

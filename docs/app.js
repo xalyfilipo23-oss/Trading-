@@ -7,6 +7,8 @@
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODEL = 'qwen/qwen3.8-27b:free';
+const CLAUDE_BASE = 'https://api.anthropic.com/v1/messages';
+const CLAUDE_MODEL = 'claude-sonnet-5';
 const TWELVEDATA_BASE = 'https://api.twelvedata.com/time_series';
 
 // ---------------------------------------------------------------
@@ -58,15 +60,17 @@ function getSettings() {
     geminiKey: localStorage.getItem('geminiKey') || '',
     model: localStorage.getItem('model') || 'gemini-3.6-flash',
     twelveKey: localStorage.getItem('twelveKey') || '',
-    openrouterKey: localStorage.getItem('openrouterKey') || ''
+    openrouterKey: localStorage.getItem('openrouterKey') || '',
+    claudeKey: localStorage.getItem('claudeKey') || ''
   };
 }
 
-function saveSettings(geminiKey, model, twelveKey, openrouterKey) {
+function saveSettings(geminiKey, model, twelveKey, openrouterKey, claudeKey) {
   localStorage.setItem('geminiKey', geminiKey);
   localStorage.setItem('model', model);
   localStorage.setItem('twelveKey', twelveKey);
   localStorage.setItem('openrouterKey', openrouterKey);
+  localStorage.setItem('claudeKey', claudeKey);
 }
 
 function getHistory() {
@@ -198,7 +202,45 @@ async function analyzeCandlesOpenRouter(promptText, apiKey) {
 }
 
 // ---------------------------------------------------------------
-// PARSEO COMPARTIDO DE LA RESPUESTA JSON (Gemini u OpenRouter)
+// ANALISIS CON CLAUDE (Anthropic) — proveedor principal de pago
+// ---------------------------------------------------------------
+async function analyzeCandlesClaude(promptText, apiKey) {
+  const body = {
+    model: CLAUDE_MODEL,
+    max_tokens: 1024,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: promptText }]
+  };
+
+  const response = await fetch(CLAUDE_BASE, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      // Necesario para poder llamar la API de Anthropic directo desde el navegador
+      // (sin esto, el navegador bloquea la peticion por CORS).
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`Error de Claude (${response.status}): ${errText || response.statusText}`);
+  }
+
+  const data = await response.json();
+  const rawContent = data?.content?.[0]?.text;
+  if (!rawContent) {
+    throw new Error('Claude no devolvio contenido.');
+  }
+
+  return parseModelJson(rawContent);
+}
+
+// ---------------------------------------------------------------
+// PARSEO COMPARTIDO DE LA RESPUESTA JSON (Claude, Gemini u OpenRouter)
 // ---------------------------------------------------------------
 function parseModelJson(rawContent) {
   let cleaned = rawContent.trim();
@@ -228,23 +270,36 @@ function parseModelJson(rawContent) {
 }
 
 // ---------------------------------------------------------------
-// ANALISIS CON FALLBACK AUTOMATICO: Gemini primero, OpenRouter si falla
+// ANALISIS CON FALLBACK AUTOMATICO EN CADENA
+// Orden: Claude (si tienes clave de pago configurada) -> Gemini -> OpenRouter.
+// Claude va primero porque es el proveedor de pago, mucho menos propenso a
+// los errores de "alta demanda" que dan los niveles gratis de Gemini/OpenRouter.
+// Si Claude falla o no tienes clave, sigue probando los siguientes en la lista.
 // ---------------------------------------------------------------
 async function analyzeWithFallback(promptText, settings, statusFn) {
-  try {
-    return { result: await analyzeCandles(promptText, settings.geminiKey, settings.model), usedProvider: 'Gemini' };
-  } catch (geminiErr) {
-    console.log('SMC Copilot: Gemini fallo, intentando con OpenRouter...', geminiErr);
-    if (!settings.openrouterKey) {
-      throw geminiErr; // sin key de respaldo, propaga el error original
-    }
-    if (statusFn) statusFn('Gemini no respondio, reintentando con OpenRouter...', '');
+  const providers = [];
+  if (settings.claudeKey) {
+    providers.push({ name: 'Claude', run: () => analyzeCandlesClaude(promptText, settings.claudeKey) });
+  }
+  providers.push({ name: 'Gemini', run: () => analyzeCandles(promptText, settings.geminiKey, settings.model) });
+  if (settings.openrouterKey) {
+    providers.push({ name: 'OpenRouter', run: () => analyzeCandlesOpenRouter(promptText, settings.openrouterKey) });
+  }
+
+  const errores = [];
+  for (let i = 0; i < providers.length; i++) {
+    const provider = providers[i];
     try {
-      return { result: await analyzeCandlesOpenRouter(promptText, settings.openrouterKey), usedProvider: 'OpenRouter' };
-    } catch (orErr) {
-      throw new Error(`Gemini fallo (${geminiErr.message}) y OpenRouter tambien fallo (${orErr.message})`);
+      if (i > 0 && statusFn) statusFn(`Reintentando con ${provider.name}...`, '');
+      const result = await provider.run();
+      return { result, usedProvider: provider.name };
+    } catch (err) {
+      console.log(`SMC Copilot: ${provider.name} fallo`, err);
+      errores.push(`${provider.name} fallo (${err.message})`);
     }
   }
+
+  throw new Error(errores.join(' — '));
 }
 
 // ---------------------------------------------------------------
@@ -264,6 +319,7 @@ const geminiKeyInput = document.getElementById('geminiKeyInput');
 const modelSelect = document.getElementById('modelSelect');
 const twelveKeyInput = document.getElementById('twelveKeyInput');
 const openrouterKeyInput = document.getElementById('openrouterKeyInput');
+const claudeKeyInput = document.getElementById('claudeKeyInput');
 const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 const settingsStatus = document.getElementById('settingsStatus');
 const instrumentSelect = document.getElementById('instrumentSelect');
@@ -419,8 +475,9 @@ async function runAnalysis({ silent = false } = {}) {
     // modo automatico) para que un exito posterior borre un error viejo que haya
     // quedado pegado en pantalla de un intento manual anterior que fallo.
     const hora = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    const esProveedorPrincipal = usedProvider === 'Claude' || (usedProvider === 'Gemini' && !settings.claudeKey);
     setStatus(
-      (usedProvider === 'OpenRouter' ? `Analisis completo (via OpenRouter, respaldo) — ${hora}` : `Analisis completo — ${hora}`),
+      esProveedorPrincipal ? `Analisis completo — ${hora}` : `Analisis completo (via ${usedProvider}, respaldo) — ${hora}`,
       'success'
     );
   } catch (err) {
@@ -541,6 +598,7 @@ settingsBtn.addEventListener('click', () => {
   modelSelect.value = s.model;
   twelveKeyInput.value = s.twelveKey;
   openrouterKeyInput.value = s.openrouterKey;
+  claudeKeyInput.value = s.claudeKey;
   showSettings();
 });
 
@@ -550,12 +608,13 @@ saveSettingsBtn.addEventListener('click', () => {
   const geminiKey = geminiKeyInput.value.trim();
   const twelveKey = twelveKeyInput.value.trim();
   const openrouterKey = openrouterKeyInput.value.trim();
+  const claudeKey = claudeKeyInput.value.trim();
   if (!geminiKey || !twelveKey) {
-    settingsStatus.textContent = 'Completa Gemini y Twelve Data (obligatorias). OpenRouter es opcional.';
+    settingsStatus.textContent = 'Completa Gemini y Twelve Data (obligatorias). Claude y OpenRouter son opcionales.';
     settingsStatus.className = 'status-msg error';
     return;
   }
-  saveSettings(geminiKey, modelSelect.value, twelveKey, openrouterKey);
+  saveSettings(geminiKey, modelSelect.value, twelveKey, openrouterKey, claudeKey);
   settingsStatus.textContent = 'Guardado correctamente.';
   settingsStatus.className = 'status-msg success';
   setTimeout(() => { settingsStatus.textContent = ''; showMain(); }, 800);
