@@ -388,12 +388,14 @@ async function runAnalysis({ silent = false } = {}) {
       notifyApto(result, symbol);
     }
 
-    if (!silent) {
-      setStatus(
-        usedProvider === 'OpenRouter' ? 'Analisis completo (via OpenRouter, respaldo).' : 'Analisis completo.',
-        'success'
-      );
-    }
+    // Siempre limpiamos/actualizamos el estado (incluso en corridas silenciosas del
+    // modo automatico) para que un exito posterior borre un error viejo que haya
+    // quedado pegado en pantalla de un intento manual anterior que fallo.
+    const hora = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    setStatus(
+      (usedProvider === 'OpenRouter' ? `Analisis completo (via OpenRouter, respaldo) — ${hora}` : `Analisis completo — ${hora}`),
+      'success'
+    );
   } catch (err) {
     if (!silent) setStatus(err.message || 'Error inesperado.', 'error');
     console.log('SMC Copilot error:', err);
