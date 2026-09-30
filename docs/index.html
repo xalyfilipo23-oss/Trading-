@@ -52,6 +52,28 @@
           <option value="15" selected>Cada 15 minutos</option>
           <option value="30">Cada 30 minutos</option>
         </select>
+
+        <div class="switch-row">
+          <span>Solo en horario programado</span>
+          <label class="switch">
+            <input type="checkbox" id="activeHoursToggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div id="activeHoursFields" class="hidden">
+          <div class="time-range">
+            <div>
+              <label for="activeStartInput">Desde</label>
+              <input type="time" id="activeStartInput" value="08:00" />
+            </div>
+            <div>
+              <label for="activeEndInput">Hasta</label>
+              <input type="time" id="activeEndInput" value="12:00" />
+            </div>
+          </div>
+          <p class="hint">Fuera de este rango, el Modo Automatico se pausa solo (no hace falta que lo apagues tu). Hora de tu dispositivo.</p>
+        </div>
+
         <p class="hint" id="autoModeHint">Apagado. Analiza manualmente con el boton de abajo.</p>
         <p class="hint warn">⚠ Solo funciona mientras esta app este abierta (aunque sea en segundo plano). Si la cierras del todo, se detiene.</p>
       </div>

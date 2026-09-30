@@ -77,10 +77,12 @@ function getHistory() {
   }
 }
 
+const HISTORY_MAX = 60; // suficiente para cubrir varios dias de pruebas sin perder registros
+
 function addToHistory(entry) {
   const history = getHistory();
   history.unshift(entry);
-  localStorage.setItem('history', JSON.stringify(history.slice(0, 10)));
+  localStorage.setItem('history', JSON.stringify(history.slice(0, HISTORY_MAX)));
 }
 
 // ---------------------------------------------------------------
@@ -268,6 +270,10 @@ const instrumentSelect = document.getElementById('instrumentSelect');
 const timeframeSelect = document.getElementById('timeframeSelect');
 const autoModeToggle = document.getElementById('autoModeToggle');
 const intervalSelect = document.getElementById('intervalSelect');
+const activeHoursToggle = document.getElementById('activeHoursToggle');
+const activeHoursFields = document.getElementById('activeHoursFields');
+const activeStartInput = document.getElementById('activeStartInput');
+const activeEndInput = document.getElementById('activeEndInput');
 const autoModeHint = document.getElementById('autoModeHint');
 const tradePlanBox = document.getElementById('tradePlanBox');
 const tpGatillo = document.getElementById('tpGatillo');
@@ -320,12 +326,33 @@ function renderHistory() {
   history.forEach((h) => {
     const div = document.createElement('div');
     div.className = 'history-item';
-    const time = new Date(h.timestamp).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    const fecha = new Date(h.timestamp);
+    const fechaStr = fecha.toLocaleDateString('es', { day: '2-digit', month: '2-digit' });
+    const horaStr = fecha.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    const esApto = h.veredicto === 'APTO';
+
+    // Para las entradas APTO con plan de trade, guardamos el detalle completo
+    // (entrada/SL/TP/zona) para poder revisarlo despues en TradingView y ver
+    // si hubiera sido una entrada valida, aunque no la hayas alcanzado a operar.
+    const planHtml = (esApto && h.entrada)
+      ? `
+        <div class="hist-plan">
+          <div class="hist-plan-row"><span>Zona</span><span>${h.zona || '-'}</span></div>
+          <div class="hist-plan-row"><span>Gatillo</span><span>${h.gatillo || '-'}</span></div>
+          <div class="hist-plan-row"><span>Entrada</span><span>${h.entrada}</span></div>
+          <div class="hist-plan-row"><span>Stop Loss</span><span>${h.stopLoss || '-'}</span></div>
+          <div class="hist-plan-row"><span>Take Profit</span><span>${h.takeProfit || '-'}</span></div>
+          <div class="hist-plan-row"><span>R:R</span><span>${h.rrReal || '-'}</span></div>
+        </div>
+      `
+      : '';
+
     div.innerHTML = `
-      <div>
-        <div class="hist-verdict ${h.veredicto === 'APTO' ? 'apto' : 'no-apto'}">${h.veredicto} ${h.direccion !== 'NINGUNA' ? h.direccion : ''}</div>
-        <div class="hist-meta">${h.symbol} · ${time}</div>
+      <div class="hist-top">
+        <div class="hist-verdict ${esApto ? 'apto' : 'no-apto'}">${h.veredicto} ${h.direccion !== 'NINGUNA' ? h.direccion : ''}</div>
+        <div class="hist-meta">${h.symbol} · ${fechaStr} ${horaStr}</div>
       </div>
+      ${planHtml}
     `;
     historyList.appendChild(div);
   });
@@ -407,10 +434,43 @@ async function runAnalysis({ silent = false } = {}) {
 // ---------------------------------------------------------------
 let autoModeTimer = null;
 
+// ---------------------------------------------------------------
+// HORARIO PROGRAMADO (opcional): el Modo Automatico solo dispara
+// analisis dentro del rango Desde/Hasta configurado, y se salta los
+// ticks fuera de ese rango sin que tengas que apagarlo/prenderlo tu.
+// ---------------------------------------------------------------
+function isWithinActiveHours() {
+  if (!activeHoursToggle.checked) return true; // sin horario = siempre activo
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+  const [startH, startM] = (activeStartInput.value || '00:00').split(':').map(Number);
+  const [endH, endM] = (activeEndInput.value || '23:59').split(':').map(Number);
+  const startMinutes = startH * 60 + startM;
+  const endMinutes = endH * 60 + endM;
+
+  if (startMinutes <= endMinutes) {
+    // Rango normal en el mismo dia (ej. 08:00 a 12:00)
+    return nowMinutes >= startMinutes && nowMinutes <= endMinutes;
+  }
+  // Rango que cruza medianoche (ej. 22:00 a 02:00)
+  return nowMinutes >= startMinutes || nowMinutes <= endMinutes;
+}
+
 function updateAutoModeHint() {
-  autoModeHint.textContent = autoModeToggle.checked
-    ? `Activo — analizando ${instrumentSelect.value} cada ${intervalSelect.value} minutos.`
-    : 'Apagado. Analiza manualmente con el boton de abajo.';
+  if (!autoModeToggle.checked) {
+    autoModeHint.textContent = 'Apagado. Analiza manualmente con el boton de abajo.';
+    return;
+  }
+  const base = `Activo — analizando ${instrumentSelect.value} cada ${intervalSelect.value} minutos.`;
+  if (activeHoursToggle.checked) {
+    const rango = `Solo entre ${activeStartInput.value} y ${activeEndInput.value}.`;
+    autoModeHint.textContent = isWithinActiveHours()
+      ? `${base} ${rango} (dentro del horario ahora)`
+      : `${base} ${rango} (fuera de horario, en pausa hasta que entre en rango)`;
+  } else {
+    autoModeHint.textContent = base;
+  }
 }
 
 async function startAutoMode() {
@@ -420,10 +480,20 @@ async function startAutoMode() {
   }
   if (autoModeTimer) clearInterval(autoModeTimer);
   const minutes = Number(intervalSelect.value);
-  autoModeTimer = setInterval(() => runAnalysis({ silent: true }), minutes * 60 * 1000);
+  autoModeTimer = setInterval(() => {
+    if (isWithinActiveHours()) {
+      runAnalysis({ silent: true });
+    }
+    updateAutoModeHint(); // refresca el texto por si acaba de entrar/salir del rango
+  }, minutes * 60 * 1000);
   localStorage.setItem('autoModeOn', 'true');
   localStorage.setItem('autoModeInterval', String(minutes));
-  runAnalysis({ silent: true }); // primer analisis inmediato
+  localStorage.setItem('activeHoursOn', activeHoursToggle.checked ? 'true' : 'false');
+  localStorage.setItem('activeStart', activeStartInput.value);
+  localStorage.setItem('activeEnd', activeEndInput.value);
+  if (isWithinActiveHours()) {
+    runAnalysis({ silent: true }); // primer analisis inmediato, solo si ya estamos en horario
+  }
   updateAutoModeHint();
 }
 
@@ -441,6 +511,23 @@ autoModeToggle.addEventListener('change', () => {
 
 intervalSelect.addEventListener('change', () => {
   if (autoModeToggle.checked) startAutoMode();
+});
+
+activeHoursToggle.addEventListener('change', () => {
+  activeHoursFields.classList.toggle('hidden', !activeHoursToggle.checked);
+  localStorage.setItem('activeHoursOn', activeHoursToggle.checked ? 'true' : 'false');
+  if (autoModeToggle.checked) startAutoMode();
+  else updateAutoModeHint();
+});
+
+activeStartInput.addEventListener('change', () => {
+  localStorage.setItem('activeStart', activeStartInput.value);
+  updateAutoModeHint();
+});
+
+activeEndInput.addEventListener('change', () => {
+  localStorage.setItem('activeEnd', activeEndInput.value);
+  updateAutoModeHint();
 });
 
 instrumentSelect.addEventListener('change', updateAutoModeHint);
@@ -486,11 +573,24 @@ analyzeBtn.addEventListener('click', () => runAnalysis());
   }
   renderHistory();
 
+  // Restauramos el horario programado ANTES de encender el modo automatico,
+  // para que startAutoMode() ya calcule bien si estamos dentro del rango.
+  if (localStorage.getItem('activeHoursOn') === 'true') {
+    activeHoursToggle.checked = true;
+    activeHoursFields.classList.remove('hidden');
+  }
+  const savedStart = localStorage.getItem('activeStart');
+  const savedEnd = localStorage.getItem('activeEnd');
+  if (savedStart) activeStartInput.value = savedStart;
+  if (savedEnd) activeEndInput.value = savedEnd;
+
   if (localStorage.getItem('autoModeOn') === 'true') {
     autoModeToggle.checked = true;
     const savedInterval = localStorage.getItem('autoModeInterval');
     if (savedInterval) intervalSelect.value = savedInterval;
     startAutoMode();
+  } else {
+    updateAutoModeHint();
   }
 
   if ('serviceWorker' in navigator) {
