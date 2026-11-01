@@ -27,6 +27,8 @@ Se te van a dar TRES conjuntos de velas del MISMO instrumento, en tres temporali
 
 Tu veredicto final APTO solo debe darse cuando las TRES capas esten alineadas: el sesgo de 1H, la zona de 15M, y el gatillo confirmado en 5M — igual que como un trader profesional analiza de mayor a menor temporalidad antes de ejecutar.
 
+Ademas de las velas, recibiras una seccion NIVELES CALCULADOS POR CODIGO (swings, FVG sin rellenar, order blocks candidatos, maximo/minimo del dia previo y de los ultimos dias, rangos de Asia y Londres, ATR). Son datos objetivos calculados con reglas fijas: usalos como referencia para ubicar zonas, liquidez (maximos/minimos que el precio podria barrer) y el tamaño realista de SL/TP segun el ATR. Los order blocks son solo candidatos por regla simple: tu decides si son validos. Si las velas contradicen un nivel, confia en las velas.
+
 Se estricto y honesto: la mayoria de los momentos NO son una entrada valida. Solo marca APTO cuando la confluencia de las tres temporalidades sea realmente convincente. Si tienes dudas razonables, marca NO APTO. (Unica excepcion: si el mensaje del usuario activa expresamente el MODO FLEXIBLE, sigue sus instrucciones para marcar setups de calidad B.)
 
 SI Y SOLO SI el veredicto es APTO, ademas debes proponer un plan de trade concreto y ejecutable usando los precios EXACTOS de las velas de 5M (la temporalidad de ejecucion):
@@ -275,8 +277,9 @@ async function evaluateOpenSignals({ silent = true } = {}) {
 // ---------------------------------------------------------------
 // DATOS DE MERCADO (Twelve Data)
 // ---------------------------------------------------------------
-async function fetchCandles(symbol, interval, apiKey) {
-  const url = `${TWELVEDATA_BASE}?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=60&apikey=${apiKey}`;
+async function fetchCandles(symbol, interval, apiKey, outputsize = 60) {
+  // timezone=UTC para que las horas de las velas sean siempre UTC (los niveles por sesion dependen de eso)
+  const url = `${TWELVEDATA_BASE}?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=${outputsize}&timezone=UTC&apikey=${apiKey}`;
   const response = await fetch(url);
   const data = await response.json();
 
@@ -298,7 +301,7 @@ const FLEX_NOTE = `
 
 MODO FLEXIBLE ACTIVADO: en esta ventana de trading todavia no se ha registrado ninguna señal. Si hay un setup razonable (sesgo de 1H a favor, zona de 15M valida y el precio reaccionando en o cerca de la zona, aunque el gatillo de 5M no sea perfecto), puedes marcarlo APTO con calidad "B" y un plan concreto (entrada, SL y TP con R:R de al menos 1.5:1). Si el gatillo SI esta completo, usa calidad "A". Si no hay nada razonable, marca NO APTO. Nunca inventes una entrada que no tenga sentido con los datos.`;
 
-function buildMultiTimeframeText(symbol, candles1h, candles15m, candles5m, flexible = false) {
+function buildMultiTimeframeText(symbol, candles1h, candles15m, candles5m, flexible = false, levelsText = '') {
   return `Instrumento: ${symbol}
 
 === VELAS 1H (CONTEXTO - sesgo mayor) ===
@@ -309,7 +312,7 @@ ${candlesToText(candles15m)}
 
 === VELAS 5M (GATILLO - confirmacion de entrada) ===
 ${candlesToText(candles5m)}
-
+${levelsText ? '\n' + levelsText + '\n' : ''}
 Analiza las tres temporalidades con criterio SMC top-down (1H contexto, 15M zona, 5M gatillo) y responde en el formato JSON indicado.${flexible ? FLEX_NOTE : ''}`;
 }
 
@@ -990,7 +993,7 @@ async function runAnalysis({ silent = false } = {}) {
     if (!silent) setStatus('Obteniendo velas de 1H, 15M y 5M...', '');
     // Las 3 temporalidades se piden en paralelo para no triplicar el tiempo de espera
     const [candles1h, candles15m, candles5m] = await Promise.all([
-      fetchCandles(symbol, '1h', settings.twelveKey),
+      fetchCandles(symbol, '1h', settings.twelveKey, 130), // 130 velas de 1H (~5 dias) solo para calcular niveles; al modelo se le mandan las ultimas 60
       fetchCandles(symbol, '15min', settings.twelveKey),
       fetchCandles(symbol, '5min', settings.twelveKey)
     ]);
@@ -998,7 +1001,8 @@ async function runAnalysis({ silent = false } = {}) {
     // Ventana de trading actual y si hace falta el modo flexible (ninguna señal pasada la mitad de la ventana)
     const winInfo = getWindowInfo();
     const flexible = needFlexible(winInfo);
-    const promptText = buildMultiTimeframeText(symbol, candles1h, candles15m, candles5m, flexible);
+    const levelsText = (window.SMCLevels ? window.SMCLevels.buildLevelsText(candles1h, candles15m, candles5m) : '');
+    const promptText = buildMultiTimeframeText(symbol, candles1h.slice(-60), candles15m, candles5m, flexible, levelsText);
 
     if (!silent) setStatus('Analizando 1H (contexto) + 15M (zona) + 5M (gatillo)...', '');
     const statusFn = silent ? null : (msg, type) => setStatus(msg, type);
