@@ -54,24 +54,29 @@
         </select>
 
         <div class="switch-row">
-          <span>Solo en horario programado</span>
+          <span>Solo en horarios programados</span>
           <label class="switch">
             <input type="checkbox" id="activeHoursToggle" />
             <span class="slider"></span>
           </label>
         </div>
         <div id="activeHoursFields" class="hidden">
-          <div class="time-range">
-            <div>
-              <label for="activeStartInput">Desde</label>
-              <input type="time" id="activeStartInput" value="08:00" />
-            </div>
-            <div>
-              <label for="activeEndInput">Hasta</label>
-              <input type="time" id="activeEndInput" value="12:00" />
-            </div>
+          <label for="scheduleTz">Zona horaria de los horarios</label>
+          <select id="scheduleTz">
+            <option value="America/New_York">Nueva York (recomendado)</option>
+            <option value="Europe/London">Londres</option>
+            <option value="Asia/Tokyo">Tokio</option>
+            <option value="local">Mi hora (este dispositivo)</option>
+          </select>
+          <div id="windowsList"></div>
+          <button id="addWindowBtn" type="button" class="secondary-btn small-btn">+ Agregar horario</button>
+          <div class="preset-row">
+            <button type="button" class="preset-btn" data-start="02:00" data-end="05:00">Londres 02-05</button>
+            <button type="button" class="preset-btn" data-start="08:00" data-end="11:00">Nueva York 08-11</button>
+            <button type="button" class="preset-btn" data-start="19:00" data-end="22:00">Tokio 19-22</button>
           </div>
-          <p class="hint">Fuera de este rango, el Modo Automatico se pausa solo (no hace falta que lo apagues tu). Hora de tu dispositivo.</p>
+          <p class="hint">Los atajos agregan ventanas en hora de Nueva York. Fuera de los horarios el Modo Automatico se pausa solo y no gasta creditos. Con el mercado cerrado (fin de semana) tampoco analiza.</p>
+          <p class="hint" id="scheduleNow"></p>
         </div>
 
         <p class="hint" id="autoModeHint">Apagado. Analiza manualmente con el boton de abajo.</p>
@@ -100,6 +105,18 @@
           <div class="trade-row"><span>Take Profit:</span><span id="tpTP"></span></div>
           <div class="trade-row"><span>R:R real:</span><span id="tpRR"></span></div>
         </div>
+      </div>
+
+      <div id="journalBox">
+        <h3>Registro de señales (pruebas)</h3>
+        <p class="hint">Cada señal APTO queda guardada con su entrada, SL y TP. La app revisa las velas siguientes y marca si se cumplio el TP, si toco el SL, o si la entrada nunca se dio. No usa ninguna cuenta.</p>
+        <div id="journalSummary" class="stats"></div>
+        <div class="journal-actions">
+          <button id="refreshJournalBtn" type="button" class="secondary-btn small-btn">Actualizar resultados</button>
+          <button id="exportJournalBtn" type="button" class="secondary-btn small-btn">Exportar CSV</button>
+          <button id="clearJournalBtn" type="button" class="secondary-btn small-btn danger">Borrar</button>
+        </div>
+        <div id="journalList"></div>
       </div>
 
       <div id="historyBox">

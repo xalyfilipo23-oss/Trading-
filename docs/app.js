@@ -90,6 +90,181 @@ function addToHistory(entry) {
 }
 
 // ---------------------------------------------------------------
+// REGISTRO DE SEÑALES (diario de pruebas, sin cuenta demo)
+// Cada señal APTO con plan completo se guarda como una "proyeccion"
+// (entrada / SL / TP). Despues la app revisa las velas de 5M que vinieron
+// DESPUES de la señal y decide si la proyeccion se cumplio o no.
+// Estados: pendiente (esperando que el precio llegue a la entrada),
+// activa (entrada tocada, esperando TP o SL), TP, SL,
+// invalidada (el precio llego al TP sin tocar la entrada: se fue sin ti),
+// no_activada (la entrada nunca se toco), expirada (activa sin resolver).
+// ---------------------------------------------------------------
+const JOURNAL_KEY = 'journal';
+const JOURNAL_MAX = 500;
+const FIVE_MIN = 5 * 60 * 1000;
+const PENDING_EXPIRE_MS = 2 * 60 * 60 * 1000;  // si en 2h no toca la entrada, no se dio
+const ACTIVE_EXPIRE_MS = 12 * 60 * 60 * 1000;  // si en 12h no toca TP ni SL, se cierra al precio de ese momento
+
+function getJournal() {
+  try {
+    return JSON.parse(localStorage.getItem(JOURNAL_KEY) || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveJournal(journal) {
+  localStorage.setItem(JOURNAL_KEY, JSON.stringify(journal.slice(0, JOURNAL_MAX)));
+}
+
+function isOpenSignal(j) {
+  return j.status === 'pendiente' || j.status === 'activa';
+}
+
+function addSignalToJournal(result, symbol, provider) {
+  if (!result || result.veredicto !== 'APTO') return false;
+  const dir = result.direccion;
+  if (dir !== 'LONG' && dir !== 'SHORT') return false;
+  const entry = parseFloat(result.entrada);
+  const sl = parseFloat(result.stopLoss);
+  const tp = parseFloat(result.takeProfit);
+  if (![entry, sl, tp].every(Number.isFinite)) return false;
+  // Un plan incoherente (ej. LONG con SL por encima de la entrada) no se registra
+  if (dir === 'LONG' && !(sl < entry && tp > entry)) return false;
+  if (dir === 'SHORT' && !(sl > entry && tp < entry)) return false;
+
+  const journal = getJournal();
+  // Si ya hay una señal abierta del mismo instrumento y direccion, no la duplicamos:
+  // el analisis cada 15 min suele repetir el mismo setup mientras sigue vigente.
+  if (journal.some((j) => j.symbol === symbol && j.direccion === dir && isOpenSignal(j))) return false;
+
+  const risk = Math.abs(entry - sl);
+  journal.unshift({
+    id: Date.now(),
+    createdAt: Date.now(),
+    symbol,
+    direccion: dir,
+    entry,
+    sl,
+    tp,
+    rrPlan: Math.abs(tp - entry) / risk,
+    zona: result.zona || '',
+    gatillo: result.gatillo || '',
+    confianza: result.confianza || null,
+    provider: provider || '',
+    status: 'pendiente',
+    activatedAt: null,
+    closedAt: null,
+    resultR: null,
+    ambigua: false
+  });
+  saveJournal(journal);
+  return true;
+}
+
+function parseCandleTime(dt) {
+  // Twelve Data devuelve 'YYYY-MM-DD HH:mm:ss'; lo pedimos en UTC
+  return Date.parse(String(dt).replace(' ', 'T') + 'Z');
+}
+
+// Evalua UNA señal con las velas de 5M (orden cronologico). Modifica j en sitio.
+// Reglas conservadoras: si en la misma vela se tocan SL y TP, se cuenta como SL
+// (y se marca "ambigua"), porque con velas de 5M no se sabe cual fue primero.
+function evaluateSignal(j, candles) {
+  const long = j.direccion === 'LONG';
+  const risk = Math.abs(j.entry - j.sl);
+  const startMs = (Math.floor(j.createdAt / FIVE_MIN) + 1) * FIVE_MIN; // primera vela completa DESPUES de la señal
+  let prevClose = null;
+
+  const close = (status, t, resultR) => {
+    j.status = status;
+    j.closedAt = t;
+    j.resultR = resultR;
+  };
+
+  for (const c of candles) {
+    if (!isOpenSignal(j)) break;
+    const t = parseCandleTime(c.datetime);
+    if (!Number.isFinite(t) || t < startMs) continue;
+    const high = parseFloat(c.high);
+    const low = parseFloat(c.low);
+    const cl = parseFloat(c.close);
+    if (![high, low, cl].every(Number.isFinite)) continue;
+    const hitSL = long ? low <= j.sl : high >= j.sl;
+    const hitTP = long ? high >= j.tp : low <= j.tp;
+
+    if (j.status === 'pendiente') {
+      if (t - j.createdAt > PENDING_EXPIRE_MS) { close('no_activada', t, null); break; }
+      const touched = long ? low <= j.entry : high >= j.entry;
+      if (touched) {
+        j.status = 'activa';
+        j.activatedAt = t;
+        // Misma vela de activacion: SL manda (conservador); TP cuenta pero queda marcado como ambiguo
+        if (hitSL) { j.ambigua = true; close('SL', t + FIVE_MIN, -1); }
+        else if (hitTP) { j.ambigua = true; close('TP', t + FIVE_MIN, j.rrPlan); }
+      } else if (hitTP) {
+        close('invalidada', t + FIVE_MIN, null); // llego al TP sin darte la entrada
+      }
+    } else if (j.status === 'activa') {
+      if (t - j.activatedAt > ACTIVE_EXPIRE_MS) {
+        const ref = prevClose !== null ? prevClose : j.entry;
+        close('expirada', t, (long ? ref - j.entry : j.entry - ref) / risk);
+        break;
+      }
+      if (hitSL) { j.ambigua = hitTP; close('SL', t + FIVE_MIN, -1); }
+      else if (hitTP) { close('TP', t + FIVE_MIN, j.rrPlan); }
+    }
+    prevClose = cl;
+  }
+}
+
+// Pide 5M suficientes para cubrir desde la señal abierta mas vieja hasta ahora
+async function fetchCandlesSince(symbol, sinceMs, apiKey) {
+  const startMs = (Math.floor(sinceMs / FIVE_MIN) + 1) * FIVE_MIN;
+  const count = Math.min(5000, Math.ceil((Date.now() - startMs) / FIVE_MIN) + 5);
+  const url = `${TWELVEDATA_BASE}?symbol=${encodeURIComponent(symbol)}&interval=5min&outputsize=${Math.max(count, 10)}&timezone=UTC&apikey=${apiKey}`;
+  const response = await fetch(url);
+  const data = await response.json();
+  if (data.status === 'error' || !data.values) {
+    throw new Error('Error de Twelve Data: ' + (data.message || 'No se recibieron velas.'));
+  }
+  return data.values.slice().reverse();
+}
+
+let evaluatingSignals = false;
+
+async function evaluateOpenSignals({ silent = true } = {}) {
+  if (evaluatingSignals) return;
+  const settings = getSettings();
+  if (!settings.twelveKey) return;
+  const openNow = getJournal().filter(isOpenSignal);
+  if (openNow.length === 0) return;
+
+  evaluatingSignals = true;
+  try {
+    const symbols = [...new Set(openNow.map((j) => j.symbol))];
+    const candlesBySymbol = {};
+    for (const s of symbols) {
+      const oldest = Math.min(...openNow.filter((j) => j.symbol === s).map((j) => j.createdAt));
+      candlesBySymbol[s] = await fetchCandlesSince(s, oldest, settings.twelveKey);
+    }
+    // Releemos el registro DESPUES de las peticiones, por si se agrego una señal mientras esperabamos
+    const journal = getJournal();
+    journal.filter(isOpenSignal).forEach((j) => {
+      if (candlesBySymbol[j.symbol]) evaluateSignal(j, candlesBySymbol[j.symbol]);
+    });
+    saveJournal(journal);
+    renderJournal();
+    if (!silent) setStatus('Registro actualizado.', 'success');
+  } catch (err) {
+    if (!silent) setStatus(err.message || 'No se pudo actualizar el registro.', 'error');
+    console.log('SMC Copilot evaluacion error:', err);
+  } finally {
+    evaluatingSignals = false;
+  }
+}
+
+// ---------------------------------------------------------------
 // DATOS DE MERCADO (Twelve Data)
 // ---------------------------------------------------------------
 async function fetchCandles(symbol, interval, apiKey) {
@@ -328,8 +503,15 @@ const autoModeToggle = document.getElementById('autoModeToggle');
 const intervalSelect = document.getElementById('intervalSelect');
 const activeHoursToggle = document.getElementById('activeHoursToggle');
 const activeHoursFields = document.getElementById('activeHoursFields');
-const activeStartInput = document.getElementById('activeStartInput');
-const activeEndInput = document.getElementById('activeEndInput');
+const scheduleTz = document.getElementById('scheduleTz');
+const windowsList = document.getElementById('windowsList');
+const addWindowBtn = document.getElementById('addWindowBtn');
+const scheduleNow = document.getElementById('scheduleNow');
+const journalSummary = document.getElementById('journalSummary');
+const journalList = document.getElementById('journalList');
+const refreshJournalBtn = document.getElementById('refreshJournalBtn');
+const exportJournalBtn = document.getElementById('exportJournalBtn');
+const clearJournalBtn = document.getElementById('clearJournalBtn');
 const autoModeHint = document.getElementById('autoModeHint');
 const tradePlanBox = document.getElementById('tradePlanBox');
 const tpGatillo = document.getElementById('tpGatillo');
@@ -415,6 +597,150 @@ function renderHistory() {
 }
 
 // ---------------------------------------------------------------
+// VISTA DEL REGISTRO
+// ---------------------------------------------------------------
+const STATUS_LABEL = {
+  pendiente: 'Pendiente',
+  activa: 'Activa',
+  TP: 'TP cumplido',
+  SL: 'SL tocado',
+  invalidada: 'Se fue sin entrada',
+  no_activada: 'Entrada no se dio',
+  expirada: 'Expirada'
+};
+const STATUS_CLASS = {
+  pendiente: 'st-open', activa: 'st-open', TP: 'st-win', SL: 'st-loss',
+  invalidada: 'st-neutral', no_activada: 'st-neutral', expirada: 'st-neutral'
+};
+
+function fmtPrice(n) {
+  return Number.isFinite(n) ? String(Math.round(n * 100000) / 100000) : '-';
+}
+
+function fmtR(r) {
+  if (r === null || r === undefined) return '';
+  return (r > 0 ? '+' : '') + (Math.round(r * 100) / 100) + 'R';
+}
+
+function el(tag, className, text) {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function renderJournal() {
+  const journal = getJournal();
+  journalSummary.innerHTML = '';
+  journalList.innerHTML = '';
+
+  if (journal.length === 0) {
+    journalList.appendChild(el('p', 'hint', 'Aun no hay señales registradas. Se guardan solas cuando el bot marca APTO con plan completo.'));
+    return;
+  }
+
+  const wins = journal.filter((j) => j.status === 'TP').length;
+  const losses = journal.filter((j) => j.status === 'SL').length;
+  const resolved = wins + losses;
+  const open = journal.filter(isOpenSignal).length;
+  const missed = journal.filter((j) => j.status === 'invalidada' || j.status === 'no_activada').length;
+  const netR = journal.reduce((acc, j) => acc + ((j.status === 'TP' || j.status === 'SL' || j.status === 'expirada') && j.resultR !== null ? j.resultR : 0), 0);
+  const winrate = resolved > 0 ? Math.round((wins / resolved) * 100) + '%' : '-';
+
+  const stats = [
+    ['Señales', journal.length],
+    ['TP / SL', `${wins} / ${losses}`],
+    ['Acierto', winrate],
+    ['R neto', fmtR(netR) || '0R'],
+    ['Abiertas', open],
+    ['Sin entrada', missed]
+  ];
+  stats.forEach(([label, value]) => {
+    const box = el('div', 'stat');
+    box.appendChild(el('div', 'stat-value', String(value)));
+    box.appendChild(el('div', 'stat-label', label));
+    journalSummary.appendChild(box);
+  });
+
+  journal.slice(0, 40).forEach((j) => {
+    const item = el('div', 'journal-item');
+    const top = el('div', 'hist-top');
+    const left = el('div', 'hist-verdict ' + (j.direccion === 'LONG' ? 'apto' : 'no-apto'), `${j.direccion} ${j.symbol}`);
+    const badge = el('span', 'status-badge ' + (STATUS_CLASS[j.status] || ''), STATUS_LABEL[j.status] || j.status);
+    top.appendChild(left);
+    top.appendChild(badge);
+    item.appendChild(top);
+
+    const fecha = new Date(j.createdAt);
+    const fechaStr = fecha.toLocaleDateString('es', { day: '2-digit', month: '2-digit' }) + ' ' +
+      fecha.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    item.appendChild(el('div', 'hist-meta', `${fechaStr} · ${j.provider || ''}`.trim()));
+
+    const plan = el('div', 'hist-plan');
+    [
+      ['Entrada', fmtPrice(j.entry)],
+      ['Stop Loss', fmtPrice(j.sl)],
+      ['Take Profit', fmtPrice(j.tp)],
+      ['R:R plan', Math.round(j.rrPlan * 10) / 10 + ':1']
+    ].forEach(([k, v]) => {
+      const row = el('div', 'hist-plan-row');
+      row.appendChild(el('span', '', k));
+      row.appendChild(el('span', '', v));
+      plan.appendChild(row);
+    });
+    if (j.resultR !== null && j.resultR !== undefined) {
+      const row = el('div', 'hist-plan-row');
+      row.appendChild(el('span', '', 'Resultado'));
+      row.appendChild(el('span', '', fmtR(j.resultR) + (j.ambigua ? ' (ambigua)' : '')));
+      plan.appendChild(row);
+    }
+    if (j.zona) {
+      const row = el('div', 'hist-plan-row');
+      row.appendChild(el('span', '', 'Zona'));
+      row.appendChild(el('span', '', j.zona));
+      plan.appendChild(row);
+    }
+    item.appendChild(plan);
+    journalList.appendChild(item);
+  });
+}
+
+function exportJournalCsv() {
+  const journal = getJournal();
+  if (journal.length === 0) {
+    setStatus('No hay señales para exportar todavia.', 'error');
+    return;
+  }
+  const head = ['fecha_local', 'instrumento', 'direccion', 'entrada', 'sl', 'tp', 'rr_plan', 'estado', 'resultado_R', 'ambigua', 'confianza', 'proveedor', 'zona', 'gatillo'];
+  const q = (v) => '"' + String(v === null || v === undefined ? '' : v).replace(/"/g, '""') + '"';
+  const rows = journal.map((j) => [
+    new Date(j.createdAt).toLocaleString('es'), j.symbol, j.direccion, j.entry, j.sl, j.tp,
+    Math.round(j.rrPlan * 100) / 100, j.status, j.resultR === null ? '' : Math.round(j.resultR * 100) / 100,
+    j.ambigua ? 'si' : 'no', j.confianza, j.provider, j.zona, j.gatillo
+  ].map(q).join(','));
+  const csv = '﻿' + [head.join(','), ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'registro-senales-' + new Date().toISOString().slice(0, 10) + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+refreshJournalBtn.addEventListener('click', async () => {
+  setStatus('Revisando resultados de las señales abiertas...', '');
+  await evaluateOpenSignals({ silent: false });
+});
+exportJournalBtn.addEventListener('click', exportJournalCsv);
+clearJournalBtn.addEventListener('click', () => {
+  if (confirm('¿Borrar TODO el registro de señales? No se puede deshacer. Exporta el CSV antes si lo quieres guardar.')) {
+    saveJournal([]);
+    renderJournal();
+  }
+});
+
+// ---------------------------------------------------------------
 // NOTIFICACIONES LOCALES
 // ---------------------------------------------------------------
 async function ensureNotificationPermission() {
@@ -466,6 +792,7 @@ async function runAnalysis({ silent = false } = {}) {
     displayResult(result);
     addToHistory({ ...result, timestamp: Date.now(), symbol });
     renderHistory();
+    if (addSignalToJournal(result, symbol, usedProvider)) renderJournal();
 
     if (result.veredicto === 'APTO') {
       notifyApto(result, symbol);
@@ -483,6 +810,9 @@ async function runAnalysis({ silent = false } = {}) {
   } catch (err) {
     if (!silent) setStatus(err.message || 'Error inesperado.', 'error');
     console.log('SMC Copilot error:', err);
+  } finally {
+    // Siempre revisamos si alguna señal abierta ya llego a su TP o SL (1 credito de Twelve Data por instrumento)
+    evaluateOpenSignals();
   }
 }
 
@@ -492,39 +822,124 @@ async function runAnalysis({ silent = false } = {}) {
 let autoModeTimer = null;
 
 // ---------------------------------------------------------------
-// HORARIO PROGRAMADO (opcional): el Modo Automatico solo dispara
-// analisis dentro del rango Desde/Hasta configurado, y se salta los
-// ticks fuera de ese rango sin que tengas que apagarlo/prenderlo tu.
+// HORARIOS PROGRAMADOS: una o varias ventanas (Desde/Hasta) en la zona
+// horaria elegida (por defecto Nueva York, donde se mueve el mercado).
+// Fuera de ellas el Modo Automatico NO analiza (no gasta creditos) y se
+// reanuda solo. Ademas, no analiza con el mercado de Forex cerrado.
 // ---------------------------------------------------------------
-function isWithinActiveHours() {
-  if (!activeHoursToggle.checked) return true; // sin horario = siempre activo
-  const now = new Date();
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+const DEFAULT_SCHEDULE = {
+  on: false,
+  tz: 'America/New_York',
+  windows: [
+    { start: '09:00', end: '11:00' },
+    { start: '16:00', end: '17:00' }
+  ]
+};
 
-  const [startH, startM] = (activeStartInput.value || '00:00').split(':').map(Number);
-  const [endH, endM] = (activeEndInput.value || '23:59').split(':').map(Number);
-  const startMinutes = startH * 60 + startM;
-  const endMinutes = endH * 60 + endM;
+const TZ_NAMES = {
+  'America/New_York': 'Nueva York',
+  'Asia/Tokyo': 'Tokio',
+  'Europe/London': 'Londres',
+  local: 'tu hora'
+};
 
-  if (startMinutes <= endMinutes) {
-    // Rango normal en el mismo dia (ej. 08:00 a 12:00)
-    return nowMinutes >= startMinutes && nowMinutes <= endMinutes;
+function getSchedule() {
+  try {
+    const s = JSON.parse(localStorage.getItem('schedule') || 'null');
+    if (s && Array.isArray(s.windows)) return s;
+  } catch (e) { /* usamos el valor por defecto */ }
+  return JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
+}
+
+let schedule = getSchedule();
+
+function saveSchedule() {
+  localStorage.setItem('schedule', JSON.stringify(schedule));
+}
+
+// Hora/minuto/dia de la semana "ahora" en una zona horaria
+function nowIn(tz) {
+  const d = new Date();
+  if (tz === 'local') {
+    return { minutes: d.getHours() * 60 + d.getMinutes(), weekday: d.getDay() };
   }
-  // Rango que cruza medianoche (ej. 22:00 a 02:00)
-  return nowMinutes >= startMinutes || nowMinutes <= endMinutes;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short'
+  }).formatToParts(d);
+  const get = (type) => parts.find((p) => p.type === type).value;
+  const days = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return { minutes: (Number(get('hour')) % 24) * 60 + Number(get('minute')), weekday: days[get('weekday')] };
+}
+
+function timeToMinutes(hhmm) {
+  const [h, m] = String(hhmm || '00:00').split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+// Forex/Oro cierran desde el viernes ~17:00 hasta el domingo ~17:00 (hora de Nueva York)
+function isMarketOpen() {
+  const ny = nowIn('America/New_York');
+  if (ny.weekday === 6) return false;
+  if (ny.weekday === 5 && ny.minutes >= 17 * 60) return false;
+  if (ny.weekday === 0 && ny.minutes < 17 * 60) return false;
+  return true;
+}
+
+function isWithinActiveHours() {
+  if (!schedule.on) return true; // sin horario = siempre activo
+  if (schedule.windows.length === 0) return false;
+  const { minutes } = nowIn(schedule.tz);
+  return schedule.windows.some((w) => {
+    const start = timeToMinutes(w.start);
+    const end = timeToMinutes(w.end);
+    if (start <= end) return minutes >= start && minutes <= end;
+    return minutes >= start || minutes <= end; // cruza medianoche
+  });
+}
+
+function shouldAnalyzeNow() {
+  return isMarketOpen() && isWithinActiveHours();
+}
+
+function renderScheduleUI() {
+  activeHoursToggle.checked = schedule.on;
+  activeHoursFields.classList.toggle('hidden', !schedule.on);
+  scheduleTz.value = schedule.tz;
+  windowsList.innerHTML = '';
+  schedule.windows.forEach((w, i) => {
+    const row = el('div', 'window-row');
+    const start = document.createElement('input');
+    start.type = 'time'; start.value = w.start; start.dataset.i = i; start.dataset.field = 'start';
+    const sep = el('span', '', 'a');
+    const end = document.createElement('input');
+    end.type = 'time'; end.value = w.end; end.dataset.i = i; end.dataset.field = 'end';
+    const del = el('button', 'icon-btn small', '✕');
+    del.type = 'button'; del.dataset.del = i; del.title = 'Quitar horario';
+    row.append(start, sep, end, del);
+    windowsList.appendChild(row);
+  });
+  const ny = nowIn('America/New_York');
+  const hh = String(Math.floor(ny.minutes / 60)).padStart(2, '0');
+  const mm = String(ny.minutes % 60).padStart(2, '0');
+  scheduleNow.textContent = `Ahora en Nueva York son las ${hh}:${mm}. ` +
+    (isMarketOpen() ? '' : 'El mercado de Forex esta cerrado (fin de semana): no se analiza. ');
 }
 
 function updateAutoModeHint() {
+  renderScheduleUI();
   if (!autoModeToggle.checked) {
     autoModeHint.textContent = 'Apagado. Analiza manualmente con el boton de abajo.';
     return;
   }
   const base = `Activo — analizando ${instrumentSelect.value} cada ${intervalSelect.value} minutos.`;
-  if (activeHoursToggle.checked) {
-    const rango = `Solo entre ${activeStartInput.value} y ${activeEndInput.value}.`;
+  if (!isMarketOpen()) {
+    autoModeHint.textContent = `${base} Mercado cerrado ahora: en pausa hasta que abra.`;
+  } else if (schedule.on) {
+    const rangos = schedule.windows.map((w) => `${w.start}-${w.end}`).join(' y ') || '(sin horarios)';
+    const zona = TZ_NAMES[schedule.tz] || schedule.tz;
     autoModeHint.textContent = isWithinActiveHours()
-      ? `${base} ${rango} (dentro del horario ahora)`
-      : `${base} ${rango} (fuera de horario, en pausa hasta que entre en rango)`;
+      ? `${base} Horarios (${zona}): ${rangos}. Dentro del horario ahora.`
+      : `${base} Horarios (${zona}): ${rangos}. Fuera de horario: en pausa hasta que entre en rango.`;
   } else {
     autoModeHint.textContent = base;
   }
@@ -538,17 +953,17 @@ async function startAutoMode() {
   if (autoModeTimer) clearInterval(autoModeTimer);
   const minutes = Number(intervalSelect.value);
   autoModeTimer = setInterval(() => {
-    if (isWithinActiveHours()) {
+    if (shouldAnalyzeNow()) {
       runAnalysis({ silent: true });
+    } else {
+      // Aunque no toque analizar, igual revisamos si alguna señal abierta ya se resolvio
+      evaluateOpenSignals();
     }
     updateAutoModeHint(); // refresca el texto por si acaba de entrar/salir del rango
   }, minutes * 60 * 1000);
   localStorage.setItem('autoModeOn', 'true');
   localStorage.setItem('autoModeInterval', String(minutes));
-  localStorage.setItem('activeHoursOn', activeHoursToggle.checked ? 'true' : 'false');
-  localStorage.setItem('activeStart', activeStartInput.value);
-  localStorage.setItem('activeEnd', activeEndInput.value);
-  if (isWithinActiveHours()) {
+  if (shouldAnalyzeNow()) {
     runAnalysis({ silent: true }); // primer analisis inmediato, solo si ya estamos en horario
   }
   updateAutoModeHint();
@@ -571,20 +986,50 @@ intervalSelect.addEventListener('change', () => {
 });
 
 activeHoursToggle.addEventListener('change', () => {
-  activeHoursFields.classList.toggle('hidden', !activeHoursToggle.checked);
-  localStorage.setItem('activeHoursOn', activeHoursToggle.checked ? 'true' : 'false');
-  if (autoModeToggle.checked) startAutoMode();
-  else updateAutoModeHint();
-});
-
-activeStartInput.addEventListener('change', () => {
-  localStorage.setItem('activeStart', activeStartInput.value);
+  schedule.on = activeHoursToggle.checked;
+  saveSchedule();
   updateAutoModeHint();
 });
 
-activeEndInput.addEventListener('change', () => {
-  localStorage.setItem('activeEnd', activeEndInput.value);
+scheduleTz.addEventListener('change', () => {
+  schedule.tz = scheduleTz.value;
+  saveSchedule();
   updateAutoModeHint();
+});
+
+windowsList.addEventListener('change', (e) => {
+  const i = Number(e.target.dataset.i);
+  const field = e.target.dataset.field;
+  if (!Number.isInteger(i) || !field || !schedule.windows[i] || !e.target.value) return;
+  schedule.windows[i][field] = e.target.value;
+  saveSchedule();
+  updateAutoModeHint();
+});
+
+windowsList.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-del]');
+  if (!btn) return;
+  schedule.windows.splice(Number(btn.dataset.del), 1);
+  saveSchedule();
+  updateAutoModeHint();
+});
+
+function addWindow(start, end) {
+  if (schedule.windows.length >= 5) return;
+  schedule.windows.push({ start, end });
+  saveSchedule();
+  updateAutoModeHint();
+}
+
+addWindowBtn.addEventListener('click', () => addWindow('09:00', '11:00'));
+
+// Atajos: ventanas clasicas de actividad, expresadas en hora de Nueva York
+document.querySelectorAll('.preset-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    schedule.tz = 'America/New_York';
+    schedule.on = true;
+    addWindow(btn.dataset.start, btn.dataset.end);
+  });
 });
 
 instrumentSelect.addEventListener('change', updateAutoModeHint);
@@ -632,16 +1077,21 @@ analyzeBtn.addEventListener('click', () => runAnalysis());
   }
   renderHistory();
 
-  // Restauramos el horario programado ANTES de encender el modo automatico,
-  // para que startAutoMode() ya calcule bien si estamos dentro del rango.
-  if (localStorage.getItem('activeHoursOn') === 'true') {
-    activeHoursToggle.checked = true;
-    activeHoursFields.classList.remove('hidden');
+  // Migracion: si antes tenias un unico horario guardado (hora de tu dispositivo),
+  // lo convertimos al nuevo formato de ventanas.
+  if (!localStorage.getItem('schedule') && localStorage.getItem('activeHoursOn') === 'true') {
+    schedule = {
+      on: true,
+      tz: 'local',
+      windows: [{
+        start: localStorage.getItem('activeStart') || '08:00',
+        end: localStorage.getItem('activeEnd') || '12:00'
+      }]
+    };
+    saveSchedule();
   }
-  const savedStart = localStorage.getItem('activeStart');
-  const savedEnd = localStorage.getItem('activeEnd');
-  if (savedStart) activeStartInput.value = savedStart;
-  if (savedEnd) activeEndInput.value = savedEnd;
+  renderScheduleUI();
+  renderJournal();
 
   if (localStorage.getItem('autoModeOn') === 'true') {
     autoModeToggle.checked = true;
@@ -651,6 +1101,9 @@ analyzeBtn.addEventListener('click', () => runAnalysis());
   } else {
     updateAutoModeHint();
   }
+
+  // Al abrir la app, ponemos al dia las señales que quedaron abiertas mientras estaba cerrada
+  evaluateOpenSignals();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
