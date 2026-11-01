@@ -26,7 +26,7 @@ Se te van a dar TRES conjuntos de velas del MISMO instrumento, en tres temporali
 
 Tu veredicto final APTO solo debe darse cuando las TRES capas esten alineadas: el sesgo de 1H, la zona de 15M, y el gatillo confirmado en 5M — igual que como un trader profesional analiza de mayor a menor temporalidad antes de ejecutar.
 
-Se estricto y honesto: la mayoria de los momentos NO son una entrada valida. Solo marca APTO cuando la confluencia de las tres temporalidades sea realmente convincente. Si tienes dudas razonables, marca NO APTO.
+Se estricto y honesto: la mayoria de los momentos NO son una entrada valida. Solo marca APTO cuando la confluencia de las tres temporalidades sea realmente convincente. Si tienes dudas razonables, marca NO APTO. (Unica excepcion: si el mensaje del usuario activa expresamente el MODO FLEXIBLE, sigue sus instrucciones para marcar setups de calidad B.)
 
 SI Y SOLO SI el veredicto es APTO, ademas debes proponer un plan de trade concreto y ejecutable usando los precios EXACTOS de las velas de 5M (la temporalidad de ejecucion):
 - gatillo: la condicion exacta que confirmo la entrada en 5M.
@@ -43,6 +43,7 @@ Responde EXCLUSIVAMENTE en el siguiente formato JSON, sin texto adicional antes 
   "veredicto": "APTO" o "NO APTO",
   "direccion": "LONG", "SHORT", o "NINGUNA",
   "confianza": numero del 1 al 10,
+  "calidad": "A" (las tres capas alineadas, gatillo confirmado), "B" (solo si el mensaje activa el MODO FLEXIBLE y el setup es razonable pero incompleto), o null si es NO APTO,
   "analisis": "Explicacion breve (4-6 frases) que mencione: el sesgo de 1H, la zona de 15M identificada, y si hubo o no gatillo confirmado en 5M — y por que llegas a este veredicto.",
   "zona": "Descripcion breve de la zona de 15M con precios.",
   "gatillo": "string o null",
@@ -121,7 +122,7 @@ function isOpenSignal(j) {
   return j.status === 'pendiente' || j.status === 'activa';
 }
 
-function addSignalToJournal(result, symbol, provider) {
+function addSignalToJournal(result, symbol, provider, windowKey = null, flexible = false) {
   if (!result || result.veredicto !== 'APTO') return false;
   const dir = result.direccion;
   if (dir !== 'LONG' && dir !== 'SHORT') return false;
@@ -151,6 +152,8 @@ function addSignalToJournal(result, symbol, provider) {
     zona: result.zona || '',
     gatillo: result.gatillo || '',
     confianza: result.confianza || null,
+    calidad: result.calidad || (flexible ? 'B' : 'A'),
+    windowKey,
     provider: provider || '',
     status: 'pendiente',
     activatedAt: null,
@@ -286,7 +289,11 @@ function candlesToText(candles) {
     .join('\n');
 }
 
-function buildMultiTimeframeText(symbol, candles1h, candles15m, candles5m) {
+const FLEX_NOTE = `
+
+MODO FLEXIBLE ACTIVADO: en esta ventana de trading todavia no se ha registrado ninguna señal. Si hay un setup razonable (sesgo de 1H a favor, zona de 15M valida y el precio reaccionando en o cerca de la zona, aunque el gatillo de 5M no sea perfecto), puedes marcarlo APTO con calidad "B" y un plan concreto (entrada, SL y TP con R:R de al menos 1.5:1). Si el gatillo SI esta completo, usa calidad "A". Si no hay nada razonable, marca NO APTO. Nunca inventes una entrada que no tenga sentido con los datos.`;
+
+function buildMultiTimeframeText(symbol, candles1h, candles15m, candles5m, flexible = false) {
   return `Instrumento: ${symbol}
 
 === VELAS 1H (CONTEXTO - sesgo mayor) ===
@@ -298,7 +305,7 @@ ${candlesToText(candles15m)}
 === VELAS 5M (GATILLO - confirmacion de entrada) ===
 ${candlesToText(candles5m)}
 
-Analiza las tres temporalidades con criterio SMC top-down (1H contexto, 15M zona, 5M gatillo) y responde en el formato JSON indicado.`;
+Analiza las tres temporalidades con criterio SMC top-down (1H contexto, 15M zona, 5M gatillo) y responde en el formato JSON indicado.${flexible ? FLEX_NOTE : ''}`;
 }
 
 // ---------------------------------------------------------------
@@ -427,6 +434,7 @@ function parseModelJson(rawContent) {
       veredicto: parsed.veredicto || 'NO APTO',
       direccion: parsed.direccion || 'NINGUNA',
       confianza: parsed.confianza || null,
+      calidad: parsed.calidad === 'B' ? 'B' : (parsed.calidad === 'A' ? 'A' : null),
       analisis: parsed.analisis || '(sin analisis)',
       zona: parsed.zona || '(sin zona)',
       gatillo: parsed.gatillo || null,
@@ -647,13 +655,19 @@ function renderJournal() {
   const netR = journal.reduce((acc, j) => acc + ((j.status === 'TP' || j.status === 'SL' || j.status === 'expirada') && j.resultR !== null ? j.resultR : 0), 0);
   const winrate = resolved > 0 ? Math.round((wins / resolved) * 100) + '%' : '-';
 
+  const tpsl = (q) => `${journal.filter((j) => j.status === 'TP' && (j.calidad || 'A') === q).length} / ${journal.filter((j) => j.status === 'SL' && (j.calidad || 'A') === q).length}`;
+  const analyzedWindows = Object.keys(getWindowLog()).length;
+  const windowsWithSignal = new Set(journal.map((j) => j.windowKey).filter(Boolean)).size;
   const stats = [
     ['Señales', journal.length],
     ['TP / SL', `${wins} / ${losses}`],
     ['Acierto', winrate],
     ['R neto', fmtR(netR) || '0R'],
     ['Abiertas', open],
-    ['Sin entrada', missed]
+    ['Sin entrada', missed],
+    ['Ventanas con señal', `${windowsWithSignal} / ${Math.max(analyzedWindows, windowsWithSignal)}`],
+    ['Calidad A (TP/SL)', tpsl('A')],
+    ['Calidad B (TP/SL)', tpsl('B')]
   ];
   stats.forEach(([label, value]) => {
     const box = el('div', 'stat');
@@ -674,7 +688,7 @@ function renderJournal() {
     const fecha = new Date(j.createdAt);
     const fechaStr = fecha.toLocaleDateString('es', { day: '2-digit', month: '2-digit' }) + ' ' +
       fecha.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
-    item.appendChild(el('div', 'hist-meta', `${fechaStr} · ${j.provider || ''}`.trim()));
+    item.appendChild(el('div', 'hist-meta', `${fechaStr} · ${j.provider || ''} · Calidad ${j.calidad || 'A'}`));
 
     const plan = el('div', 'hist-plan');
     [
@@ -711,12 +725,12 @@ function exportJournalCsv() {
     setStatus('No hay señales para exportar todavia.', 'error');
     return;
   }
-  const head = ['fecha_local', 'instrumento', 'direccion', 'entrada', 'sl', 'tp', 'rr_plan', 'estado', 'resultado_R', 'ambigua', 'confianza', 'proveedor', 'zona', 'gatillo'];
+  const head = ['fecha_local', 'instrumento', 'direccion', 'entrada', 'sl', 'tp', 'rr_plan', 'estado', 'resultado_R', 'ambigua', 'calidad', 'ventana', 'confianza', 'proveedor', 'zona', 'gatillo'];
   const q = (v) => '"' + String(v === null || v === undefined ? '' : v).replace(/"/g, '""') + '"';
   const rows = journal.map((j) => [
     new Date(j.createdAt).toLocaleString('es'), j.symbol, j.direccion, j.entry, j.sl, j.tp,
     Math.round(j.rrPlan * 100) / 100, j.status, j.resultR === null ? '' : Math.round(j.resultR * 100) / 100,
-    j.ambigua ? 'si' : 'no', j.confianza, j.provider, j.zona, j.gatillo
+    j.ambigua ? 'si' : 'no', j.calidad || 'A', j.windowKey || '', j.confianza, j.provider, j.zona, j.gatillo
   ].map(q).join(','));
   const csv = '﻿' + [head.join(','), ...rows].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -780,7 +794,10 @@ async function runAnalysis({ silent = false } = {}) {
       fetchCandles(symbol, '5min', settings.twelveKey)
     ]);
 
-    const promptText = buildMultiTimeframeText(symbol, candles1h, candles15m, candles5m);
+    // Ventana de trading actual y si hace falta el modo flexible (ninguna señal pasada la mitad de la ventana)
+    const winInfo = getWindowInfo();
+    const flexible = needFlexible(winInfo);
+    const promptText = buildMultiTimeframeText(symbol, candles1h, candles15m, candles5m, flexible);
 
     if (!silent) setStatus('Analizando 1H (contexto) + 15M (zona) + 5M (gatillo)...', '');
     const { result, usedProvider } = await analyzeWithFallback(
@@ -792,7 +809,8 @@ async function runAnalysis({ silent = false } = {}) {
     displayResult(result);
     addToHistory({ ...result, timestamp: Date.now(), symbol });
     renderHistory();
-    if (addSignalToJournal(result, symbol, usedProvider)) renderJournal();
+    if (winInfo) logWindowAnalysis(winInfo.key);
+    if (addSignalToJournal(result, symbol, usedProvider, winInfo ? winInfo.key : null, flexible)) renderJournal();
 
     if (result.veredicto === 'APTO') {
       notifyApto(result, symbol);
@@ -897,8 +915,66 @@ function isWithinActiveHours() {
   });
 }
 
+// Fecha YYYY-MM-DD en una zona horaria
+function dateIn(tz) {
+  const opts = tz === 'local' ? {} : { timeZone: tz };
+  return new Intl.DateTimeFormat('en-CA', { ...opts, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+
+function getMaxSignals() {
+  const n = Number(localStorage.getItem('maxSignals'));
+  return [1, 2, 3, 5].includes(n) ? n : 3;
+}
+
+// Ventana de trading en la que estamos ahora (o null si estamos fuera de todas).
+// Con horarios apagados, el "dia" completo cuenta como una sola ventana.
+function getWindowInfo() {
+  if (!schedule.on) return { key: 'dia|' + dateIn('local'), idx: null, elapsedFrac: null };
+  const { minutes } = nowIn(schedule.tz);
+  const dateStr = dateIn(schedule.tz);
+  for (let i = 0; i < schedule.windows.length; i++) {
+    const w = schedule.windows[i];
+    const start = timeToMinutes(w.start);
+    const end = timeToMinutes(w.end);
+    const inside = start <= end ? (minutes >= start && minutes <= end) : (minutes >= start || minutes <= end);
+    if (!inside) continue;
+    const len = ((end - start + 1440) % 1440) || 1;
+    const elapsed = (minutes - start + 1440) % 1440;
+    return { key: `${dateStr}|${i}|${w.start}-${w.end}`, idx: i, elapsedFrac: Math.min(elapsed / len, 1) };
+  }
+  return null;
+}
+
+function signalsInWindow(key) {
+  return getJournal().filter((j) => j.windowKey === key).length;
+}
+
+function quotaReached() {
+  const info = getWindowInfo();
+  return !!info && signalsInWindow(info.key) >= getMaxSignals();
+}
+
+// Minimo 1 señal por ventana: pasada la mitad de la ventana sin ninguna, se activa el modo flexible
+function needFlexible(info) {
+  return !!info && info.idx !== null && info.elapsedFrac >= 0.5 && signalsInWindow(info.key) < 1;
+}
+
+// Cuantos analisis se hicieron en cada ventana (para saber en cuantas ventanas hubo y no hubo señal)
+function logWindowAnalysis(key) {
+  let log = {};
+  try { log = JSON.parse(localStorage.getItem('windowLog') || '{}'); } catch (e) { log = {}; }
+  log[key] = (log[key] || 0) + 1;
+  const keys = Object.keys(log);
+  if (keys.length > 120) keys.slice(0, keys.length - 120).forEach((k) => delete log[k]);
+  localStorage.setItem('windowLog', JSON.stringify(log));
+}
+
+function getWindowLog() {
+  try { return JSON.parse(localStorage.getItem('windowLog') || '{}'); } catch (e) { return {}; }
+}
+
 function shouldAnalyzeNow() {
-  return isMarketOpen() && isWithinActiveHours();
+  return isMarketOpen() && isWithinActiveHours() && !quotaReached();
 }
 
 function renderScheduleUI() {
@@ -931,8 +1007,14 @@ function updateAutoModeHint() {
     autoModeHint.textContent = 'Apagado. Analiza manualmente con el boton de abajo.';
     return;
   }
-  const base = `Activo — analizando ${instrumentSelect.value} cada ${intervalSelect.value} minutos.`;
-  if (!isMarketOpen()) {
+  const info = getWindowInfo();
+  const max = getMaxSignals();
+  const n = info ? signalsInWindow(info.key) : 0;
+  const meta = info ? ` Señales en esta ventana: ${n}/${max}${needFlexible(info) ? ' (modo flexible activo)' : ''}.` : '';
+  const base = `Activo — analizando ${instrumentSelect.value} cada ${intervalSelect.value} minutos.${meta}`;
+  if (info && n >= max) {
+    autoModeHint.textContent = `${base} Meta cumplida: en pausa hasta la proxima ventana.`;
+  } else if (!isMarketOpen()) {
     autoModeHint.textContent = `${base} Mercado cerrado ahora: en pausa hasta que abra.`;
   } else if (schedule.on) {
     const rangos = schedule.windows.map((w) => `${w.start}-${w.end}`).join(' y ') || '(sin horarios)';
@@ -1034,6 +1116,86 @@ document.querySelectorAll('.preset-btn').forEach((btn) => {
 
 instrumentSelect.addEventListener('change', updateAutoModeHint);
 
+const maxSignalsSelect = document.getElementById('maxSignalsSelect');
+maxSignalsSelect.value = String(getMaxSignals());
+maxSignalsSelect.addEventListener('change', () => {
+  localStorage.setItem('maxSignals', maxSignalsSelect.value);
+  updateAutoModeHint();
+});
+
+// ---------------------------------------------------------------
+// MANTENER PANTALLA ENCENDIDA (Screen Wake Lock)
+// Evita que el equipo apague la pantalla / se suspenda mientras la app esta visible.
+// ---------------------------------------------------------------
+const wakeLockToggle = document.getElementById('wakeLockToggle');
+let wakeLock = null;
+
+async function requestWakeLock() {
+  try {
+    if (!('wakeLock' in navigator)) return false;
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+    return true;
+  } catch (e) {
+    wakeLock = null;
+    return false;
+  }
+}
+
+function releaseWakeLock() {
+  if (wakeLock) wakeLock.release().catch(() => {});
+  wakeLock = null;
+}
+
+wakeLockToggle.addEventListener('change', async () => {
+  if (wakeLockToggle.checked) {
+    const ok = await requestWakeLock();
+    if (!ok) {
+      wakeLockToggle.checked = false;
+      setStatus('Este navegador no permitio mantener la pantalla encendida.', 'error');
+      return;
+    }
+    localStorage.setItem('wakeLockOn', 'true');
+  } else {
+    releaseWakeLock();
+    localStorage.setItem('wakeLockOn', 'false');
+  }
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && wakeLockToggle.checked && !wakeLock) requestWakeLock();
+});
+
+// ---------------------------------------------------------------
+// INSTALAR COMO APP (boton para pantalla de inicio / escritorio)
+// ---------------------------------------------------------------
+const installBtn = document.getElementById('installBtn');
+let deferredInstallPrompt = null;
+const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  if (!isStandalone) installBtn.classList.remove('hidden');
+});
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  installBtn.classList.add('hidden');
+});
+if (isIOS && !isStandalone) installBtn.classList.remove('hidden');
+
+installBtn.addEventListener('click', async () => {
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    installBtn.classList.add('hidden');
+  } else if (isIOS) {
+    alert('En Safari: toca el boton Compartir y luego "Agregar a pantalla de inicio".');
+  }
+});
+
 // ---------------------------------------------------------------
 // EVENTOS GENERALES
 // ---------------------------------------------------------------
@@ -1100,6 +1262,11 @@ analyzeBtn.addEventListener('click', () => runAnalysis());
     startAutoMode();
   } else {
     updateAutoModeHint();
+  }
+
+  if (localStorage.getItem('wakeLockOn') === 'true') {
+    wakeLockToggle.checked = true;
+    requestWakeLock().then((ok) => { if (!ok) wakeLockToggle.checked = false; });
   }
 
   // Al abrir la app, ponemos al dia las señales que quedaron abiertas mientras estaba cerrada

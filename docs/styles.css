@@ -234,3 +234,11 @@ input:checked + .slider:before { transform: translateX(20px); }
 .status-badge.st-open { color: #f0a02c; border-color: #f0a02c; background: rgba(240,160,44,.1); }
 .status-badge.st-neutral { color: #868993; }
 #activeHoursFields > label { display: block; font-size: 12px; color: #868993; margin: 10px 0 5px; }
+
+.switch-row select { width: auto; padding: 6px 10px; font-size: 13px; }
+.install-btn {
+  width: 100%; padding: 12px; margin-bottom: 14px; font-size: 14px; font-weight: 600;
+  background: rgba(38,166,154,.12); color: #26a69a; border: 1px solid #26a69a;
+  border-radius: 10px; cursor: pointer;
+}
+.install-btn.hidden { display: none; }

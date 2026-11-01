@@ -19,6 +19,8 @@
 
     <!-- VISTA PRINCIPAL -->
     <div id="mainView">
+      <button id="installBtn" type="button" class="install-btn hidden">📲 Instalar en tu pantalla de inicio</button>
+
       <div class="field">
         <label for="instrumentSelect">Instrumento</label>
         <select id="instrumentSelect">
@@ -52,6 +54,25 @@
           <option value="15" selected>Cada 15 minutos</option>
           <option value="30">Cada 30 minutos</option>
         </select>
+
+        <div class="switch-row">
+          <span>Señales por ventana (max.)</span>
+          <select id="maxSignalsSelect">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="5">5</option>
+          </select>
+        </div>
+        <p class="hint">Al llegar al maximo se pausa hasta la proxima ventana. Si pasada la mitad de una ventana no hay ninguna, el bot acepta un setup razonable como calidad B (se guarda aparte para comparar contra la calidad A).</p>
+
+        <div class="switch-row">
+          <span>Mantener pantalla encendida</span>
+          <label class="switch">
+            <input type="checkbox" id="wakeLockToggle" />
+            <span class="slider"></span>
+          </label>
+        </div>
 
         <div class="switch-row">
           <span>Solo en horarios programados</span>
