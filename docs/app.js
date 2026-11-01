@@ -9,6 +9,7 @@ const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODEL = 'qwen/qwen3.8-27b:free';
 const CLAUDE_BASE = 'https://api.anthropic.com/v1/messages';
 const CLAUDE_MODEL = 'claude-sonnet-5';
+const OPENAI_BASE = 'https://api.openai.com/v1/chat/completions';
 const TWELVEDATA_BASE = 'https://api.twelvedata.com/time_series';
 
 // ---------------------------------------------------------------
@@ -62,7 +63,10 @@ function getSettings() {
     model: localStorage.getItem('model') || 'gemini-3.6-flash',
     twelveKey: localStorage.getItem('twelveKey') || '',
     openrouterKey: localStorage.getItem('openrouterKey') || '',
-    claudeKey: localStorage.getItem('claudeKey') || ''
+    claudeKey: localStorage.getItem('claudeKey') || '',
+    openaiKey: localStorage.getItem('openaiKey') || '',
+    openaiModel: localStorage.getItem('openaiModel') || 'gpt-6.1-sol',
+    consensusOn: localStorage.getItem('consensusOn') === 'true'
   };
 }
 
@@ -153,6 +157,7 @@ function addSignalToJournal(result, symbol, provider, windowKey = null, flexible
     gatillo: result.gatillo || '',
     confianza: result.confianza || null,
     calidad: result.calidad || (flexible ? 'B' : 'A'),
+    consenso: result.consenso || '',
     windowKey,
     provider: provider || '',
     status: 'pendiente',
@@ -452,6 +457,187 @@ function parseModelJson(rawContent) {
   }
 }
 
+
+// ---------------------------------------------------------------
+// ANALISIS CON CHATGPT (OpenAI)
+// ---------------------------------------------------------------
+async function openaiRequest(messages, apiKey, model, maxTokens) {
+  let response;
+  try {
+    response = await fetch(OPENAI_BASE, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: model || 'gpt-6.1-sol',
+        messages,
+        response_format: { type: 'json_object' },
+        max_completion_tokens: maxTokens
+      })
+    });
+  } catch (e) {
+    // Un TypeError aqui suele ser CORS / bloqueo del navegador o sin internet
+    throw new Error('No se pudo conectar con OpenAI desde el navegador (puede estar bloqueado por CORS o sin internet).');
+  }
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`Error de ChatGPT (${response.status}): ${errText || response.statusText}`);
+  }
+  const data = await response.json();
+  const rawContent = data?.choices?.[0]?.message?.content;
+  if (!rawContent) throw new Error('ChatGPT no devolvio contenido.');
+  return rawContent;
+}
+
+async function analyzeCandlesOpenAI(promptText, apiKey, model) {
+  const raw = await openaiRequest(
+    [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: promptText }],
+    apiKey, model, 4000
+  );
+  return parseModelJson(raw);
+}
+
+// ---------------------------------------------------------------
+// MODO CONSENSO (Claude + ChatGPT)
+// 1) Cada uno analiza por separado, sin ver al otro.
+// 2) Si coinciden (ambos NO APTO, o ambos APTO con la misma direccion y entrada/SL
+//    parecidos) esa es la conclusion.
+// 3) Si no coinciden, UNA sola ronda: cada uno lee la opinion del otro y revisa
+//    la suya (puede corregirse o mantenerse).
+// 4) Si aun asi no coinciden, el resultado final es NO APTO (sin consenso).
+// Solo se muestra la conclusion final; lo que opino cada uno queda resumido en el analisis.
+// ---------------------------------------------------------------
+const AGREE_TOL = 0.5; // la entrada y el SL de ambos deben estar a menos de 0.5x el riesgo de diferencia
+
+function consensusEnabled(s) {
+  return !!(s.consensusOn && s.claudeKey && s.openaiKey);
+}
+
+function bothNo(a, b) {
+  return a.veredicto !== 'APTO' && b.veredicto !== 'APTO';
+}
+
+function plansAgree(a, b) {
+  if (a.veredicto !== 'APTO' || b.veredicto !== 'APTO') return false;
+  if (a.direccion !== b.direccion || (a.direccion !== 'LONG' && a.direccion !== 'SHORT')) return false;
+  const ea = parseFloat(a.entrada), eb = parseFloat(b.entrada);
+  const sa = parseFloat(a.stopLoss), sb = parseFloat(b.stopLoss);
+  if (![ea, eb, sa, sb].every(Number.isFinite)) return false;
+  const risk = Math.abs(ea - sa);
+  if (risk === 0) return false;
+  return Math.abs(ea - eb) <= AGREE_TOL * risk && Math.abs(sa - sb) <= AGREE_TOL * risk;
+}
+
+function posStr(r) {
+  return r.veredicto === 'APTO' ? `APTO ${r.direccion}` : 'NO APTO';
+}
+
+function slimResult(r) {
+  return {
+    veredicto: r.veredicto, direccion: r.direccion, analisis: r.analisis, zona: r.zona,
+    gatillo: r.gatillo, entrada: r.entrada, stopLoss: r.stopLoss, takeProfit: r.takeProfit, rrReal: r.rrReal
+  };
+}
+
+function buildDebatePrompt(original, other, otherName) {
+  return `${original}
+
+=== SEGUNDA OPINION ===
+Otro analista independiente (${otherName}) analizo los MISMOS datos y concluyo esto (JSON):
+${JSON.stringify(slimResult(other))}
+
+Revisa tu propio analisis con honestidad. Si su argumento es correcto y los datos lo respaldan, corrigelo; si no, mantén tu postura y explica brevemente por que. No cedas solo por presion: decide unicamente con los datos. Responde con el mismo formato JSON de siempre.`;
+}
+
+function mergeAgreed(c, o, via, trail) {
+  const long = c.direccion === 'LONG';
+  const entry = parseFloat(c.entrada), sl = parseFloat(c.stopLoss);
+  const tpC = parseFloat(c.takeProfit), tpO = parseFloat(o.takeProfit);
+  // TP: el mas cercano de los dos (mas conservador)
+  let tp = tpC;
+  if (Number.isFinite(tpO) && Number.isFinite(tpC)) tp = long ? Math.min(tpC, tpO) : Math.max(tpC, tpO);
+  const dec = (String(c.entrada).split('.')[1] || '').length;
+  const risk = Math.abs(entry - sl);
+  const rr = Number.isFinite(tp) && risk > 0 ? Math.abs(tp - entry) / risk : null;
+  const conf = [c.confianza, o.confianza].filter((x) => Number.isFinite(Number(x))).map(Number);
+  return {
+    veredicto: 'APTO',
+    direccion: c.direccion,
+    confianza: conf.length ? Math.round(conf.reduce((a, b) => a + b, 0) / conf.length) : null,
+    calidad: (c.calidad === 'B' || o.calidad === 'B') ? 'B' : 'A',
+    analisis: `CONSENSO ${via}: Claude y ChatGPT coinciden en ${posStr(c)}. ${trail}\n\n${c.analisis}`,
+    zona: c.zona,
+    gatillo: c.gatillo,
+    entrada: c.entrada,
+    stopLoss: c.stopLoss,
+    takeProfit: Number.isFinite(tp) ? tp.toFixed(dec) : c.takeProfit,
+    rrReal: rr !== null ? `${(Math.round(rr * 10) / 10)}:1` : c.rrReal,
+    consenso: via
+  };
+}
+
+function mergeNoApto(c, o, via, trail, label) {
+  return {
+    veredicto: 'NO APTO',
+    direccion: 'NINGUNA',
+    confianza: null,
+    calidad: null,
+    analisis: `${label} ${via}: ${trail}\n\nClaude: ${c.analisis}\n\nChatGPT: ${o.analisis}`,
+    zona: c.zona,
+    gatillo: null, entrada: null, stopLoss: null, takeProfit: null, rrReal: null,
+    consenso: via
+  };
+}
+
+async function analyzeWithConsensus(promptText, settings, statusFn) {
+  const runC = (text) => analyzeCandlesClaude(text, settings.claudeKey);
+  const runO = (text) => analyzeCandlesOpenAI(text, settings.openaiKey, settings.openaiModel);
+
+  if (statusFn) statusFn('Claude y ChatGPT analizando por separado...', '');
+  const [rc, ro] = await Promise.allSettled([runC(promptText), runO(promptText)]);
+
+  if (rc.status === 'rejected' && ro.status === 'rejected') {
+    // Ninguno de los dos respondio: probamos los proveedores de respaldo (Gemini / OpenRouter)
+    const fb = await analyzeWithFallback(promptText, { ...settings, claudeKey: '' }, statusFn);
+    return { ...fb, result: { ...fb.result, consenso: 'sin consenso (Claude y ChatGPT fallaron)' } };
+  }
+  if (rc.status === 'rejected' || ro.status === 'rejected') {
+    const okC = rc.status === 'fulfilled';
+    const name = okC ? 'Claude' : 'ChatGPT';
+    const failed = okC ? 'ChatGPT' : 'Claude';
+    const why = (okC ? ro : rc).reason?.message || '';
+    console.log(`SMC Copilot: ${failed} fallo en consenso`, why);
+    return { result: { ...(okC ? rc.value : ro.value), consenso: `sin segunda opinion (${failed} fallo)` }, usedProvider: name };
+  }
+
+  const c1 = rc.value, o1 = ro.value;
+  const provider = 'Consenso Claude+ChatGPT';
+
+  if (bothNo(c1, o1)) {
+    return { result: mergeNoApto(c1, o1, 'directo', 'ambos coinciden en NO APTO.', 'CONSENSO'), usedProvider: provider };
+  }
+  if (plansAgree(c1, o1)) {
+    return { result: mergeAgreed(c1, o1, 'directo', ''), usedProvider: provider };
+  }
+
+  // No coinciden: una sola ronda de revision cruzada
+  if (statusFn) statusFn('No coinciden: cada uno revisa la opinion del otro...', '');
+  const [rc2, ro2] = await Promise.allSettled([
+    runC(buildDebatePrompt(promptText, o1, 'ChatGPT')),
+    runO(buildDebatePrompt(promptText, c1, 'Claude'))
+  ]);
+  const c2 = rc2.status === 'fulfilled' ? rc2.value : c1;
+  const o2 = ro2.status === 'fulfilled' ? ro2.value : o1;
+  const trail = `Postura inicial → final: Claude ${posStr(c1)} → ${posStr(c2)}; ChatGPT ${posStr(o1)} → ${posStr(o2)}.`;
+
+  if (bothNo(c2, o2)) {
+    return { result: mergeNoApto(c2, o2, 'tras revision', `ambos terminan en NO APTO. ${trail}`, 'CONSENSO'), usedProvider: provider };
+  }
+  if (plansAgree(c2, o2)) {
+    return { result: mergeAgreed(c2, o2, 'tras revision', trail), usedProvider: provider };
+  }
+  return { result: mergeNoApto(c2, o2, 'sin consenso', `no se pusieron de acuerdo, asi que NO se opera. ${trail}`, 'SIN CONSENSO'), usedProvider: provider };
+}
+
 // ---------------------------------------------------------------
 // ANALISIS CON FALLBACK AUTOMATICO EN CADENA
 // Orden: Claude (si tienes clave de pago configurada) -> Gemini -> OpenRouter.
@@ -464,11 +650,14 @@ async function analyzeWithFallback(promptText, settings, statusFn) {
   if (settings.claudeKey) {
     providers.push({ name: 'Claude', run: () => analyzeCandlesClaude(promptText, settings.claudeKey) });
   }
-  providers.push({ name: 'Gemini', run: () => analyzeCandles(promptText, settings.geminiKey, settings.model) });
+  if (settings.geminiKey) {
+    providers.push({ name: 'Gemini', run: () => analyzeCandles(promptText, settings.geminiKey, settings.model) });
+  }
   if (settings.openrouterKey) {
     providers.push({ name: 'OpenRouter', run: () => analyzeCandlesOpenRouter(promptText, settings.openrouterKey) });
   }
 
+  if (providers.length === 0) throw new Error('No hay ninguna clave de IA configurada (icono ⚙).');
   const errores = [];
   for (let i = 0; i < providers.length; i++) {
     const provider = providers[i];
@@ -503,6 +692,10 @@ const modelSelect = document.getElementById('modelSelect');
 const twelveKeyInput = document.getElementById('twelveKeyInput');
 const openrouterKeyInput = document.getElementById('openrouterKeyInput');
 const claudeKeyInput = document.getElementById('claudeKeyInput');
+const openaiKeyInput = document.getElementById('openaiKeyInput');
+const openaiModelSelect = document.getElementById('openaiModelSelect');
+const consensusToggle = document.getElementById('consensusToggle');
+const testOpenaiBtn = document.getElementById('testOpenaiBtn');
 const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 const settingsStatus = document.getElementById('settingsStatus');
 const instrumentSelect = document.getElementById('instrumentSelect');
@@ -688,7 +881,7 @@ function renderJournal() {
     const fecha = new Date(j.createdAt);
     const fechaStr = fecha.toLocaleDateString('es', { day: '2-digit', month: '2-digit' }) + ' ' +
       fecha.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
-    item.appendChild(el('div', 'hist-meta', `${fechaStr} · ${j.provider || ''} · Calidad ${j.calidad || 'A'}`));
+    item.appendChild(el('div', 'hist-meta', `${fechaStr} · ${j.provider || ''} · Calidad ${j.calidad || 'A'}${j.consenso ? ' · ' + j.consenso : ''}`));
 
     const plan = el('div', 'hist-plan');
     [
@@ -725,12 +918,12 @@ function exportJournalCsv() {
     setStatus('No hay señales para exportar todavia.', 'error');
     return;
   }
-  const head = ['fecha_local', 'instrumento', 'direccion', 'entrada', 'sl', 'tp', 'rr_plan', 'estado', 'resultado_R', 'ambigua', 'calidad', 'ventana', 'confianza', 'proveedor', 'zona', 'gatillo'];
+  const head = ['fecha_local', 'instrumento', 'direccion', 'entrada', 'sl', 'tp', 'rr_plan', 'estado', 'resultado_R', 'ambigua', 'calidad', 'consenso', 'ventana', 'confianza', 'proveedor', 'zona', 'gatillo'];
   const q = (v) => '"' + String(v === null || v === undefined ? '' : v).replace(/"/g, '""') + '"';
   const rows = journal.map((j) => [
     new Date(j.createdAt).toLocaleString('es'), j.symbol, j.direccion, j.entry, j.sl, j.tp,
     Math.round(j.rrPlan * 100) / 100, j.status, j.resultR === null ? '' : Math.round(j.resultR * 100) / 100,
-    j.ambigua ? 'si' : 'no', j.calidad || 'A', j.windowKey || '', j.confianza, j.provider, j.zona, j.gatillo
+    j.ambigua ? 'si' : 'no', j.calidad || 'A', j.consenso || '', j.windowKey || '', j.confianza, j.provider, j.zona, j.gatillo
   ].map(q).join(','));
   const csv = '﻿' + [head.join(','), ...rows].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -776,12 +969,20 @@ function notifyApto(result, symbol) {
 // ---------------------------------------------------------------
 // FLUJO PRINCIPAL DE ANALISIS
 // ---------------------------------------------------------------
+let analysisRunning = false;
+
 async function runAnalysis({ silent = false } = {}) {
   const settings = getSettings();
-  if (!settings.geminiKey || !settings.twelveKey) {
-    if (!silent) setStatus('Configura ambas API keys primero (icono ⚙).', 'error');
+  const hasAnyAiKey = settings.claudeKey || settings.geminiKey || settings.openaiKey || settings.openrouterKey;
+  if (!settings.twelveKey || !hasAnyAiKey) {
+    if (!silent) setStatus('Configura Twelve Data y al menos una clave de IA primero (icono ⚙).', 'error');
     return;
   }
+  if (analysisRunning) {
+    if (!silent) setStatus('Ya hay un analisis en curso, espera a que termine.', '');
+    return;
+  }
+  analysisRunning = true;
 
   const symbol = instrumentSelect.value;
 
@@ -800,11 +1001,10 @@ async function runAnalysis({ silent = false } = {}) {
     const promptText = buildMultiTimeframeText(symbol, candles1h, candles15m, candles5m, flexible);
 
     if (!silent) setStatus('Analizando 1H (contexto) + 15M (zona) + 5M (gatillo)...', '');
-    const { result, usedProvider } = await analyzeWithFallback(
-      promptText,
-      settings,
-      silent ? null : (msg, type) => setStatus(msg, type)
-    );
+    const statusFn = silent ? null : (msg, type) => setStatus(msg, type);
+    const { result, usedProvider } = consensusEnabled(settings)
+      ? await analyzeWithConsensus(promptText, settings, statusFn)
+      : await analyzeWithFallback(promptText, settings, statusFn);
 
     displayResult(result);
     addToHistory({ ...result, timestamp: Date.now(), symbol });
@@ -820,15 +1020,16 @@ async function runAnalysis({ silent = false } = {}) {
     // modo automatico) para que un exito posterior borre un error viejo que haya
     // quedado pegado en pantalla de un intento manual anterior que fallo.
     const hora = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
-    const esProveedorPrincipal = usedProvider === 'Claude' || (usedProvider === 'Gemini' && !settings.claudeKey);
+    const esProveedorPrincipal = usedProvider === 'Claude' || usedProvider.startsWith('Consenso') || (usedProvider === 'Gemini' && !settings.claudeKey);
     setStatus(
-      esProveedorPrincipal ? `Analisis completo — ${hora}` : `Analisis completo (via ${usedProvider}, respaldo) — ${hora}`,
+      esProveedorPrincipal ? `Analisis completo${result.consenso ? ' (' + result.consenso + ')' : ''} — ${hora}` : `Analisis completo (via ${usedProvider}, respaldo) — ${hora}`,
       'success'
     );
   } catch (err) {
     if (!silent) setStatus(err.message || 'Error inesperado.', 'error');
     console.log('SMC Copilot error:', err);
   } finally {
+    analysisRunning = false;
     // Siempre revisamos si alguna señal abierta ya llego a su TP o SL (1 credito de Twelve Data por instrumento)
     evaluateOpenSignals();
   }
@@ -1206,6 +1407,9 @@ settingsBtn.addEventListener('click', () => {
   twelveKeyInput.value = s.twelveKey;
   openrouterKeyInput.value = s.openrouterKey;
   claudeKeyInput.value = s.claudeKey;
+  openaiKeyInput.value = s.openaiKey;
+  openaiModelSelect.value = s.openaiModel;
+  consensusToggle.checked = s.consensusOn;
   showSettings();
 });
 
@@ -1216,15 +1420,47 @@ saveSettingsBtn.addEventListener('click', () => {
   const twelveKey = twelveKeyInput.value.trim();
   const openrouterKey = openrouterKeyInput.value.trim();
   const claudeKey = claudeKeyInput.value.trim();
-  if (!geminiKey || !twelveKey) {
-    settingsStatus.textContent = 'Completa Gemini y Twelve Data (obligatorias). Claude y OpenRouter son opcionales.';
+  const openaiKey = openaiKeyInput.value.trim();
+  if (!twelveKey || !(claudeKey || geminiKey || openaiKey || openrouterKey)) {
+    settingsStatus.textContent = 'Falta Twelve Data (obligatoria) y al menos una clave de IA (Claude, ChatGPT, Gemini u OpenRouter).';
+    settingsStatus.className = 'status-msg error';
+    return;
+  }
+  if (consensusToggle.checked && !(claudeKey && openaiKey)) {
+    settingsStatus.textContent = 'El modo consenso necesita las claves de Claude y de ChatGPT.';
     settingsStatus.className = 'status-msg error';
     return;
   }
   saveSettings(geminiKey, modelSelect.value, twelveKey, openrouterKey, claudeKey);
+  localStorage.setItem('openaiKey', openaiKey);
+  localStorage.setItem('openaiModel', openaiModelSelect.value);
+  localStorage.setItem('consensusOn', consensusToggle.checked ? 'true' : 'false');
   settingsStatus.textContent = 'Guardado correctamente.';
   settingsStatus.className = 'status-msg success';
   setTimeout(() => { settingsStatus.textContent = ''; showMain(); }, 800);
+});
+
+// Prueba rapida de la clave de OpenAI (tambien revela si el navegador bloquea la conexion)
+testOpenaiBtn.addEventListener('click', async () => {
+  const key = openaiKeyInput.value.trim();
+  if (!key) {
+    settingsStatus.textContent = 'Pega primero tu clave de OpenAI.';
+    settingsStatus.className = 'status-msg error';
+    return;
+  }
+  settingsStatus.textContent = 'Probando conexion con ChatGPT...';
+  settingsStatus.className = 'status-msg';
+  try {
+    await openaiRequest(
+      [{ role: 'user', content: 'Responde unicamente con este JSON: {"ok": true}' }],
+      key, openaiModelSelect.value, 200
+    );
+    settingsStatus.textContent = 'Conexion con ChatGPT correcta.';
+    settingsStatus.className = 'status-msg success';
+  } catch (err) {
+    settingsStatus.textContent = err.message;
+    settingsStatus.className = 'status-msg error';
+  }
 });
 
 analyzeBtn.addEventListener('click', () => runAnalysis());
@@ -1234,7 +1470,7 @@ analyzeBtn.addEventListener('click', () => runAnalysis());
 // ---------------------------------------------------------------
 (async function init() {
   const settings = getSettings();
-  if (!settings.geminiKey || !settings.twelveKey) {
+  if (!settings.twelveKey || !(settings.claudeKey || settings.geminiKey || settings.openaiKey || settings.openrouterKey)) {
     setStatus('Configura tus API keys para empezar (icono ⚙).', '');
   }
   renderHistory();

@@ -154,7 +154,28 @@
       <input type="password" id="claudeKeyInput" placeholder="sk-ant-... (opcional, pero es el que se usa primero si lo pones)" />
       <p class="hint">Crea tu clave en <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com/settings/keys</a>. Es de pago por uso (no requiere suscripcion), y al tener tu propia clave con creditos, casi nunca da error de "alta demanda". Si la dejas vacia, la app usa Gemini como principal.</p>
 
-      <label for="geminiKeyInput">API Key de Google Gemini</label>
+      <label for="openaiKeyInput">API Key de OpenAI / ChatGPT (segundo analista, de pago)</label>
+      <input type="password" id="openaiKeyInput" placeholder="sk-... (opcional)" />
+      <p class="hint">Crea tu clave en <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys</a> y carga credito en su facturacion. Ojo: ChatGPT Plus NO incluye la API; son cuentas de pago separadas.</p>
+
+      <label for="openaiModelSelect">Modelo de ChatGPT</label>
+      <select id="openaiModelSelect">
+        <option value="gpt-6.1-sol">gpt-6.1-sol ($2 / $10 por millon de tokens, recomendado)</option>
+        <option value="gpt-6.1-terra">gpt-6.1-terra ($1 / $5, mas barato)</option>
+        <option value="gpt-6-luna">gpt-6-luna ($0.10 / $0.50, el mas economico)</option>
+      </select>
+      <button id="testOpenaiBtn" type="button" class="secondary-btn small-btn">Probar conexion con ChatGPT</button>
+
+      <div class="switch-row">
+        <span>Modo consenso (Claude + ChatGPT)</span>
+        <label class="switch">
+          <input type="checkbox" id="consensusToggle" />
+          <span class="slider"></span>
+        </label>
+      </div>
+      <p class="hint">Los dos analizan por separado. Si coinciden, esa es la conclusion. Si no, cada uno revisa la opinion del otro una sola vez; si aun asi no coinciden, el resultado es NO APTO (sin consenso). Solo ves la conclusion final. Cuesta cerca del doble que usar uno solo.</p>
+
+      <label for="geminiKeyInput">API Key de Google Gemini (respaldo, gratis)</label>
       <input type="password" id="geminiKeyInput" placeholder="Pega tu API key aqui" />
       <p class="hint">Gratis en <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a></p>
 
