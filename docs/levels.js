@@ -136,9 +136,19 @@
       const lines = [];
 
       const atr5 = atr(m5), atr15 = atr(m15), atr1h = atr(h1);
+      const np = nyParts(nowT);
+      const dias = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
+      const wd = new Date(`${np.date}T12:00:00Z`).getUTCDay();
+      lines.push(`Hora en Nueva York: ${dias[wd]} ${String(np.hour).padStart(2, '0')}:${String(np.minute).padStart(2, '0')}`);
       lines.push(`Precio actual (ultimo cierre 5M): ${f(price)}`);
       lines.push(`Sesion actual: ${sessionLabel(nowT)}`);
       lines.push(`ATR(14): 5M=${atr5 ? f(atr5) : '-'}, 15M=${atr15 ? f(atr15) : '-'}, 1H=${atr1h ? f(atr1h) : '-'}  (sirve para juzgar si un SL/TP es realista)`);
+
+      // Rango de las ultimas 24 velas de 1H frente al ATR de 1H (valores bajos sugieren acumulacion)
+      if (atr1h && h1.length >= 24) {
+        const r24 = range(h1.slice(-24));
+        lines.push(`Rango ultimas 24h (1H): ${f(r24.high - r24.low)} = ${((r24.high - r24.low) / atr1h).toFixed(1)} x ATR(1H) (un valor bajo sugiere acumulacion / mercado comprimido)`);
+      }
 
       // Dias de trading (con 1H)
       const byDay = {};
