@@ -55,7 +55,7 @@
         </select>
 
         <div class="switch-row">
-          <span>Señales por ventana (max.)</span>
+          <span>Señales por dia (max.)</span>
           <select id="maxSignalsSelect">
             <option value="1">1</option>
             <option value="2">2</option>
@@ -63,7 +63,7 @@
             <option value="5">5</option>
           </select>
         </div>
-        <p class="hint">Al llegar al maximo se pausa hasta la proxima ventana. Si pasada la mitad de una ventana no hay ninguna, el bot acepta un setup razonable como calidad B (se guarda aparte para comparar contra la calidad A).</p>
+        <p class="hint">Es un tope, no una meta: el bot solo registra las que cumplen el metodo, y al llegar al maximo del dia se pausa hasta el dia siguiente. Si en la segunda mitad de la ultima ventana del dia no hay ninguna, acepta un setup razonable como calidad B (se guarda aparte para compararlo con la calidad A).</p>
 
         <div class="switch-row">
           <span>Mantener pantalla encendida</span>

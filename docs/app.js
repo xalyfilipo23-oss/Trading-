@@ -201,6 +201,7 @@ function addSignalToJournal(result, symbol, provider, windowKey = null, flexible
     calidad: result.calidad || (flexible ? 'B' : 'A'),
     consenso: result.consenso || '',
     evalInterval,
+    dayKey: (typeof getDayKey === 'function') ? getDayKey() : null,
     tfMode: (typeof getTfMode === 'function') ? getTfMode() : '',
     windowKey,
     provider: provider || '',
@@ -900,7 +901,7 @@ function renderJournal() {
 
   const tpsl = (q) => `${journal.filter((j) => j.status === 'TP' && (j.calidad || 'A') === q).length} / ${journal.filter((j) => j.status === 'SL' && (j.calidad || 'A') === q).length}`;
   const analyzedWindows = Object.keys(getWindowLog()).length;
-  const windowsWithSignal = new Set(journal.map((j) => j.windowKey).filter(Boolean)).size;
+  const windowsWithSignal = new Set(journal.map(entryDayKey).filter(Boolean)).size;
   const stats = [
     ['Señales', journal.length],
     ['TP / SL', `${wins} / ${losses}`],
@@ -908,7 +909,7 @@ function renderJournal() {
     ['R neto', fmtR(netR) || '0R'],
     ['Abiertas', open],
     ['Sin entrada', missed],
-    ['Ventanas con señal', `${windowsWithSignal} / ${Math.max(analyzedWindows, windowsWithSignal)}`],
+    ['Dias con señal', `${windowsWithSignal} / ${Math.max(analyzedWindows, windowsWithSignal)}`],
     ['Calidad A (TP/SL)', tpsl('A')],
     ['Calidad B (TP/SL)', tpsl('B')]
   ];
@@ -1078,7 +1079,7 @@ async function runAnalysis({ silent = false } = {}) {
     displayResult(result);
     addToHistory({ ...result, timestamp: Date.now(), symbol });
     renderHistory();
-    if (winInfo) logWindowAnalysis(winInfo.key);
+    if (winInfo) logWindowAnalysis(winInfo.dayKey);
     if (addSignalToJournal(result, symbol, usedProvider, winInfo ? winInfo.key : null, flexible, L.evalInterval)) renderJournal();
 
     if (result.veredicto === 'APTO') {
@@ -1196,12 +1197,23 @@ function getMaxSignals() {
   return [1, 2, 3, 5].includes(n) ? n : 3;
 }
 
+// Dia de trading de las señales: la fecha en la zona horaria de los horarios (o la de tu dispositivo
+// si los horarios estan apagados). El tope de señales es POR DIA, sumando todas las ventanas.
+function getDayKey() {
+  return dateIn(schedule.on ? schedule.tz : 'local');
+}
+
 // Ventana de trading en la que estamos ahora (o null si estamos fuera de todas).
-// Con horarios apagados, el "dia" completo cuenta como una sola ventana.
+// Con horarios apagados, el dia completo cuenta como una sola ventana.
 function getWindowInfo() {
-  if (!schedule.on) return { key: 'dia|' + dateIn('local'), idx: null, elapsedFrac: null };
+  const dayKey = getDayKey();
+  if (!schedule.on) return { key: 'dia|' + dayKey, dayKey, idx: null, isLast: true, elapsedFrac: null };
   const { minutes } = nowIn(schedule.tz);
-  const dateStr = dateIn(schedule.tz);
+  // La "ultima ventana del dia" es la que empieza mas tarde
+  let lastIdx = 0;
+  schedule.windows.forEach((w, i) => {
+    if (timeToMinutes(w.start) > timeToMinutes(schedule.windows[lastIdx].start)) lastIdx = i;
+  });
   for (let i = 0; i < schedule.windows.length; i++) {
     const w = schedule.windows[i];
     const start = timeToMinutes(w.start);
@@ -1210,26 +1222,33 @@ function getWindowInfo() {
     if (!inside) continue;
     const len = ((end - start + 1440) % 1440) || 1;
     const elapsed = (minutes - start + 1440) % 1440;
-    return { key: `${dateStr}|${i}|${w.start}-${w.end}`, idx: i, elapsedFrac: Math.min(elapsed / len, 1) };
+    return { key: `${dayKey}|${i}|${w.start}-${w.end}`, dayKey, idx: i, isLast: i === lastIdx, elapsedFrac: Math.min(elapsed / len, 1) };
   }
   return null;
 }
 
-function signalsInWindow(key) {
-  return getJournal().filter((j) => j.windowKey === key).length;
+function entryDayKey(j) {
+  if (j.dayKey) return j.dayKey;
+  const m = /\d{4}-\d{2}-\d{2}/.exec(j.windowKey || '');
+  return m ? m[0] : null;
+}
+
+function signalsToday(dayKey) {
+  return getJournal().filter((j) => entryDayKey(j) === dayKey).length;
 }
 
 function quotaReached() {
-  const info = getWindowInfo();
-  return !!info && signalsInWindow(info.key) >= getMaxSignals();
+  return signalsToday(getDayKey()) >= getMaxSignals();
 }
 
-// Minimo 1 señal por ventana: pasada la mitad de la ventana sin ninguna, se activa el modo flexible
+// Minimo 1 señal por dia: solo en la segunda mitad de la ULTIMA ventana del dia, y solo si
+// todavia no hay ninguna, se activa el modo flexible (calidad B). Antes de eso el bot espera
+// setups completos (calidad A): el tope de señales es un limite, no una meta.
 function needFlexible(info) {
-  return !!info && info.idx !== null && info.elapsedFrac >= 0.5 && signalsInWindow(info.key) < 1;
+  return !!info && info.idx !== null && info.isLast && info.elapsedFrac >= 0.5 && signalsToday(info.dayKey) < 1;
 }
 
-// Cuantos analisis se hicieron en cada ventana (para saber en cuantas ventanas hubo y no hubo señal)
+// Cuantos analisis se hicieron cada dia (para saber en cuantos dias hubo y no hubo señal)
 function logWindowAnalysis(key) {
   let log = {};
   try { log = JSON.parse(localStorage.getItem('windowLog') || '{}'); } catch (e) { log = {}; }
@@ -1279,11 +1298,11 @@ function updateAutoModeHint() {
   }
   const info = getWindowInfo();
   const max = getMaxSignals();
-  const n = info ? signalsInWindow(info.key) : 0;
-  const meta = info ? ` Señales en esta ventana: ${n}/${max}${needFlexible(info) ? ' (modo flexible activo)' : ''}.` : '';
+  const n = signalsToday(getDayKey());
+  const meta = ` Señales hoy: ${n}/${max}${needFlexible(info) ? ' (modo flexible activo)' : ''}.`;
   const base = `Activo — analizando ${instrumentSelect.value} cada ${intervalSelect.value} minutos.${meta}`;
-  if (info && n >= max) {
-    autoModeHint.textContent = `${base} Meta cumplida: en pausa hasta la proxima ventana.`;
+  if (n >= max) {
+    autoModeHint.textContent = `${base} Tope del dia alcanzado: en pausa hasta manana.`;
   } else if (!isMarketOpen()) {
     autoModeHint.textContent = `${base} Mercado cerrado ahora: en pausa hasta que abra.`;
   } else if (schedule.on) {
