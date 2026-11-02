@@ -15,33 +15,49 @@ const TWELVEDATA_BASE = 'https://api.twelvedata.com/time_series';
 // ---------------------------------------------------------------
 // PROMPT DEL SISTEMA (adaptado para datos numericos, no imagen)
 // ---------------------------------------------------------------
-const SYSTEM_PROMPT = `Eres un analista de trading intradiario experto en Smart Money Concepts (SMC). Analizas velas OHLC reales (datos numericos exactos, no una imagen) de un instrumento de Forex u Oro, para operaciones rapidas en temporalidades bajas (scalping / intradia). Tu tarea es decidir si existe AHORA una entrada valida segun el METODO DEL USUARIO, descrito abajo con precision. Se estricto y honesto: la mayoria de los momentos NO son una entrada valida.
+// Marcos de tiempo del analisis (3 capas: macro -> medio -> gatillo).
+// 'scalp': macro 15M / zona 5M / gatillo 1M (para mas operaciones al dia).
+// 'intra': macro 1H / zona 15M / gatillo 5M (el esquema original).
+// evalInterval: con que velas se evalua despues si la señal llego a TP o SL.
+const TF_MODES = {
+  scalp: { label: 'Scalping: 15M (macro) → 5M (zona) → 1M (gatillo)', macro: '15M', mid: '5M', trig: '1M', evalInterval: '1min' },
+  intra: { label: 'Intradia: 1H (macro) → 15M (zona) → 5M (gatillo)', macro: '1H', mid: '15M', trig: '5M', evalInterval: '5min' }
+};
+
+function getTfMode() {
+  const m = localStorage.getItem('tfMode');
+  return TF_MODES[m] ? m : 'scalp';
+}
+
+function buildSystemPrompt(L) {
+  const M = L.macro, E = L.mid, G = L.trig;
+  return `Eres un analista de trading intradiario experto en Smart Money Concepts (SMC). Analizas velas OHLC reales (datos numericos exactos, no una imagen) de un instrumento de Forex u Oro, para operaciones rapidas en temporalidades bajas (scalping / intradia). Tu tarea es decidir si existe AHORA una entrada valida segun el METODO DEL USUARIO, descrito abajo con precision. Se estricto y honesto: la mayoria de los momentos NO son una entrada valida.
 
 DATOS QUE RECIBES
-- VELAS 1H (contexto macro), VELAS 15M (movimiento y order block) y VELAS 5M (confirmacion / gatillo), del MISMO instrumento, en orden cronologico (la ultima es la mas reciente).
+- VELAS ${M} (contexto macro), VELAS ${E} (movimiento y order block) y VELAS ${G} (confirmacion / gatillo), del MISMO instrumento, en orden cronologico (la ultima es la mas reciente).
 - Una seccion NIVELES CALCULADOS POR CODIGO: swings, FVG sin rellenar, order blocks candidatos, maximo/minimo del dia previo y de los ultimos dias, rangos de Asia y Londres, ATR, sesion y dia de la semana (hora de Nueva York). Son datos objetivos calculados con reglas fijas: usalos para ubicar zonas, liquidez (maximos/minimos que el precio podria barrer) y el tamano realista de SL/TP segun el ATR. Los order blocks de esa lista son solo candidatos por una regla simple: tu decides si son validos segun el metodo. Si las velas contradicen un nivel calculado, confia en las velas.
 
-EL METODO (top-down: 1H -> 15M -> 5M)
+EL METODO (top-down: ${M} -> ${E} -> ${G})
 El usuario opera CAMBIOS DE TENDENCIA (reversiones) que nacen en una zona macro importante: compra desde zonas de demanda tras barrer liquidez de minimos, y vende desde zonas de oferta tras barrer liquidez de maximos. La direccion del trade la define la reaccion en la zona, no una tendencia previa.
 
-PASO 1 - ZONA MACRO EN 1H
+PASO 1 - ZONA MACRO EN ${M}
 Busca un nivel horizontal de precio (un maximo o un minimo) que el precio haya TESTEADO varias veces (2 o mas toques o rechazos) sin romperlo con claridad: es una zona con liquidez y un order block macro valido. Tambien cuenta cuando hay varios picos o minimos alineados en la misma zona que ninguno ha atravesado. Si el precio actual no esta en o cerca de una zona asi, no hay operacion.
 
-PASO 2 - ORDER BLOCK EN 15M
-Dentro o junto a la zona de 1H, el order block de 15M es la ULTIMA vela contraria (bajista para compras, alcista para ventas) justo antes de un movimiento fuerte e impulsivo. Es VALIDO solo si:
+PASO 2 - ORDER BLOCK EN ${E}
+Dentro o junto a la zona de ${M}, el order block de ${E} es la ULTIMA vela contraria (bajista para compras, alcista para ventas) justo antes de un movimiento fuerte e impulsivo. Es VALIDO solo si:
 - el movimiento posterior fue fuerte y decidido: una o muy pocas velas grandes con cuerpo dominante, sin mucha resistencia (un movimiento "de una");
 - es la ultima vela contraria antes de ese movimiento (no una anterior);
 - hay liquidez cerca (maximos o minimos iguales, swings cercanos) y el precio todavia no ha vuelto a mitigarlo.
 Es INVALIDO si el movimiento fue gradual: una "escalera" con muchas velas del mismo color, pausas y reanudaciones, poca decision. Es normal que el precio regrese a esa zona; ahi se espera la reaccion.
 
-PASO 3 - GATILLO EN 5M (confirmacion)
-Con el precio en la zona (1H / 15M) debe haber ocurrido en 5M, en este orden:
+PASO 3 - GATILLO EN ${G} (confirmacion)
+Con el precio en la zona (${M} / ${E}) debe haber ocurrido en ${G}, en este orden:
 (a) una barrida de liquidez: el precio rompe un minimo (o maximo) reciente y lo recupera, y
-(b) un CHoCH: ruptura de la estructura de 5M en la direccion contraria al movimiento previo (cambio de tendencia), idealmente con un desplazamiento fuerte que deje un FVG a favor de la nueva direccion.
+(b) un CHoCH: ruptura de la estructura de ${G} en la direccion contraria al movimiento previo (cambio de tendencia), idealmente con un desplazamiento fuerte que deje un FVG a favor de la nueva direccion.
 Sin barrida y CHoCH confirmados NO hay entrada. No te adelantes al gatillo: si falta, el veredicto es NO APTO.
 
 PASO 4 - PLAN DE TRADE (solo si hay APTO)
-- Entrada: en el FVG que dejo el desplazamiento del CHoCH (o, si no hay FVG, en el order block de 5M que lo origino), esperando el retroceso hacia ese punto. Puede ser un precio limite distinto del precio actual. Si el precio ya se alejo mas de aproximadamente 1 ATR(5M) de ese punto sin retroceder, no persigas la entrada: NO APTO.
+- Entrada: en el FVG que dejo el desplazamiento del CHoCH (o, si no hay FVG, en el order block de ${G} que lo origino), esperando el retroceso hacia ese punto. Puede ser un precio limite distinto del precio actual. Si el precio ya se alejo mas de aproximadamente 1 ATR(5M) de ese punto sin retroceder, no persigas la entrada: NO APTO.
 - Stop loss: mas alla del ultimo extremo: debajo del ultimo minimo (el de la barrida) para compras, encima del ultimo maximo para ventas, en un precio que el mercado aun no ha alcanzado, con un pequeno margen para que no lo toque una mecha normal (referencia: 0.1 a 0.25 ATR de 5M). Si no hay un ultimo extremo claro, ponlo mas alla del order block.
 - Take profit: el FVG o el order block opuesto mas cercano en la direccion del trade (primera meta). Relacion riesgo:beneficio MINIMA de 1:2 (lo ideal es de 1:2 a 1:3). Si la primera meta no da 1:2, usa la siguiente meta alcanzable; si ninguna alcanzable da al menos 1:2, NO APTO. Nunca propongas 1:1. Menciona en el analisis las metas siguientes, por si el precio las alcanza.
 
@@ -52,7 +68,7 @@ CUANDO NO OPERAR (NO APTO)
 - El precio esta lejos de la zona, o el setup ya se invalido, o los datos son insuficientes o contradictorios.
 (Unica excepcion: si el mensaje del usuario activa expresamente el MODO FLEXIBLE, sigue sus instrucciones para marcar setups de calidad B.)
 
-FORMATO DEL PLAN (solo si el veredicto es APTO), usando precios numericos coherentes con los datos de 5M:
+FORMATO DEL PLAN (solo si el veredicto es APTO), usando precios numericos coherentes con los datos de ${G}:
 - gatillo: la condicion exacta que confirmo la entrada (barrida + CHoCH, con precios).
 - entrada, stopLoss, takeProfit: precios numericos.
 - rrReal: la relacion riesgo:beneficio real resultante (ej. "2.5:1").
@@ -65,14 +81,20 @@ Responde EXCLUSIVAMENTE en el siguiente formato JSON, sin texto adicional antes 
   "direccion": "LONG", "SHORT", o "NINGUNA",
   "confianza": numero del 1 al 10,
   "calidad": "A" (zona macro + order block valido + barrida y CHoCH confirmados), "B" (solo si el mensaje activa el MODO FLEXIBLE y el setup es razonable pero incompleto), o null si es NO APTO,
-  "analisis": "Explicacion breve (4-6 frases): la zona macro de 1H, el order block de 15M y si es valido, si hubo o no barrida y CHoCH en 5M, si el mercado parece en acumulacion, y por que llegas a este veredicto.",
-  "zona": "Descripcion breve de la zona (1H / 15M) con precios.",
+  "analisis": "Explicacion breve (4-6 frases): la zona macro de ${M}, el order block de ${E} y si es valido, si hubo o no barrida y CHoCH en ${G}, si el mercado parece en acumulacion, y por que llegas a este veredicto.",
+  "zona": "Descripcion breve de la zona (${M} / ${E}) con precios.",
   "gatillo": "string o null",
   "entrada": "numero (string) o null",
   "stopLoss": "numero (string) o null",
   "takeProfit": "numero (string) o null",
   "rrReal": "string o null"
 }`;
+}
+
+function getSystemPrompt() {
+  return buildSystemPrompt(TF_MODES[getTfMode()]);
+}
+
 
 // ---------------------------------------------------------------
 // ALMACENAMIENTO (localStorage, funciona igual en cualquier navegador)
@@ -146,7 +168,7 @@ function isOpenSignal(j) {
   return j.status === 'pendiente' || j.status === 'activa';
 }
 
-function addSignalToJournal(result, symbol, provider, windowKey = null, flexible = false) {
+function addSignalToJournal(result, symbol, provider, windowKey = null, flexible = false, evalInterval = '5min') {
   if (!result || result.veredicto !== 'APTO') return false;
   const dir = result.direccion;
   if (dir !== 'LONG' && dir !== 'SHORT') return false;
@@ -178,6 +200,8 @@ function addSignalToJournal(result, symbol, provider, windowKey = null, flexible
     confianza: result.confianza || null,
     calidad: result.calidad || (flexible ? 'B' : 'A'),
     consenso: result.consenso || '',
+    evalInterval,
+    tfMode: (typeof getTfMode === 'function') ? getTfMode() : '',
     windowKey,
     provider: provider || '',
     status: 'pendiente',
@@ -199,9 +223,10 @@ function parseCandleTime(dt) {
 // Reglas conservadoras: si en la misma vela se tocan SL y TP, se cuenta como SL
 // (y se marca "ambigua"), porque con velas de 5M no se sabe cual fue primero.
 function evaluateSignal(j, candles) {
+  const step = j.evalInterval === '1min' ? 60 * 1000 : FIVE_MIN; // tamano de las velas con las que se evalua
   const long = j.direccion === 'LONG';
   const risk = Math.abs(j.entry - j.sl);
-  const startMs = (Math.floor(j.createdAt / FIVE_MIN) + 1) * FIVE_MIN; // primera vela completa DESPUES de la señal
+  const startMs = (Math.floor(j.createdAt / step) + 1) * step; // primera vela completa DESPUES de la señal
   let prevClose = null;
 
   const close = (status, t, resultR) => {
@@ -228,10 +253,10 @@ function evaluateSignal(j, candles) {
         j.status = 'activa';
         j.activatedAt = t;
         // Misma vela de activacion: SL manda (conservador); TP cuenta pero queda marcado como ambiguo
-        if (hitSL) { j.ambigua = true; close('SL', t + FIVE_MIN, -1); }
-        else if (hitTP) { j.ambigua = true; close('TP', t + FIVE_MIN, j.rrPlan); }
+        if (hitSL) { j.ambigua = true; close('SL', t + step, -1); }
+        else if (hitTP) { j.ambigua = true; close('TP', t + step, j.rrPlan); }
       } else if (hitTP) {
-        close('invalidada', t + FIVE_MIN, null); // llego al TP sin darte la entrada
+        close('invalidada', t + step, null); // llego al TP sin darte la entrada
       }
     } else if (j.status === 'activa') {
       if (t - j.activatedAt > ACTIVE_EXPIRE_MS) {
@@ -239,18 +264,19 @@ function evaluateSignal(j, candles) {
         close('expirada', t, (long ? ref - j.entry : j.entry - ref) / risk);
         break;
       }
-      if (hitSL) { j.ambigua = hitTP; close('SL', t + FIVE_MIN, -1); }
-      else if (hitTP) { close('TP', t + FIVE_MIN, j.rrPlan); }
+      if (hitSL) { j.ambigua = hitTP; close('SL', t + step, -1); }
+      else if (hitTP) { close('TP', t + step, j.rrPlan); }
     }
     prevClose = cl;
   }
 }
 
 // Pide 5M suficientes para cubrir desde la señal abierta mas vieja hasta ahora
-async function fetchCandlesSince(symbol, sinceMs, apiKey) {
-  const startMs = (Math.floor(sinceMs / FIVE_MIN) + 1) * FIVE_MIN;
-  const count = Math.min(5000, Math.ceil((Date.now() - startMs) / FIVE_MIN) + 5);
-  const url = `${TWELVEDATA_BASE}?symbol=${encodeURIComponent(symbol)}&interval=5min&outputsize=${Math.max(count, 10)}&timezone=UTC&apikey=${apiKey}`;
+async function fetchCandlesSince(symbol, sinceMs, apiKey, interval = '5min') {
+  const step = interval === '1min' ? 60 * 1000 : FIVE_MIN;
+  const startMs = (Math.floor(sinceMs / step) + 1) * step;
+  const count = Math.min(5000, Math.ceil((Date.now() - startMs) / step) + 5);
+  const url = `${TWELVEDATA_BASE}?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=${Math.max(count, 10)}&timezone=UTC&apikey=${apiKey}`;
   const response = await fetch(url);
   const data = await response.json();
   if (data.status === 'error' || !data.values) {
@@ -270,16 +296,20 @@ async function evaluateOpenSignals({ silent = true } = {}) {
 
   evaluatingSignals = true;
   try {
-    const symbols = [...new Set(openNow.map((j) => j.symbol))];
-    const candlesBySymbol = {};
-    for (const s of symbols) {
-      const oldest = Math.min(...openNow.filter((j) => j.symbol === s).map((j) => j.createdAt));
-      candlesBySymbol[s] = await fetchCandlesSince(s, oldest, settings.twelveKey);
+    // Una peticion por instrumento y por tamano de vela de evaluacion (1 credito cada una)
+    const groupKey = (j) => `${j.symbol}|${j.evalInterval || '5min'}`;
+    const groups = [...new Set(openNow.map(groupKey))];
+    const candlesByGroup = {};
+    for (const g of groups) {
+      const [sym, interval] = g.split('|');
+      const oldest = Math.min(...openNow.filter((j) => groupKey(j) === g).map((j) => j.createdAt));
+      candlesByGroup[g] = await fetchCandlesSince(sym, oldest, settings.twelveKey, interval);
     }
     // Releemos el registro DESPUES de las peticiones, por si se agrego una señal mientras esperabamos
     const journal = getJournal();
     journal.filter(isOpenSignal).forEach((j) => {
-      if (candlesBySymbol[j.symbol]) evaluateSignal(j, candlesBySymbol[j.symbol]);
+      const cs = candlesByGroup[groupKey(j)];
+      if (cs) evaluateSignal(j, cs);
     });
     saveJournal(journal);
     renderJournal();
@@ -317,21 +347,21 @@ function candlesToText(candles) {
 
 const FLEX_NOTE = `
 
-MODO FLEXIBLE ACTIVADO: en esta ventana de trading todavia no se ha registrado ninguna señal. Si hay un setup razonable (sesgo de 1H a favor, zona de 15M valida y el precio reaccionando en o cerca de la zona, aunque el gatillo de 5M no sea perfecto), puedes marcarlo APTO con calidad "B" y un plan concreto (entrada, SL y TP con R:R de al menos 1.5:1). Si el gatillo SI esta completo, usa calidad "A". Si no hay nada razonable, marca NO APTO. Nunca inventes una entrada que no tenga sentido con los datos.`;
+MODO FLEXIBLE ACTIVADO: en esta ventana de trading todavia no se ha registrado ninguna señal. Si hay un setup razonable (zona macro valida, order block valido y el precio reaccionando en o cerca de la zona, aunque el gatillo (barrida + CHoCH) no sea perfecto o completo), puedes marcarlo APTO con calidad "B" y un plan concreto (entrada, SL y TP con R:R de al menos 1.5:1). Si el gatillo SI esta completo, usa calidad "A". Si no hay nada razonable, marca NO APTO. Nunca inventes una entrada que no tenga sentido con los datos.`;
 
-function buildMultiTimeframeText(symbol, candles1h, candles15m, candles5m, flexible = false, levelsText = '') {
+function buildMultiTimeframeText(symbol, candlesMacro, candlesMid, candlesTrig, flexible = false, levelsText = '', L = TF_MODES.intra) {
   return `Instrumento: ${symbol}
 
-=== VELAS 1H (CONTEXTO - sesgo mayor) ===
-${candlesToText(candles1h)}
+=== VELAS ${L.macro} (MACRO - zona de liquidez / order block macro) ===
+${candlesToText(candlesMacro)}
 
-=== VELAS 15M (ZONA - Order Block / FVG) ===
-${candlesToText(candles15m)}
+=== VELAS ${L.mid} (MEDIO - order block / FVG / movimiento) ===
+${candlesToText(candlesMid)}
 
-=== VELAS 5M (GATILLO - confirmacion de entrada) ===
-${candlesToText(candles5m)}
+=== VELAS ${L.trig} (GATILLO - confirmacion de entrada) ===
+${candlesToText(candlesTrig)}
 ${levelsText ? '\n' + levelsText + '\n' : ''}
-Analiza las tres temporalidades con criterio SMC top-down (1H contexto, 15M zona, 5M gatillo) y responde en el formato JSON indicado.${flexible ? FLEX_NOTE : ''}`;
+Analiza las tres temporalidades con el metodo indicado, de mayor a menor (${L.macro} macro, ${L.mid} medio, ${L.trig} gatillo), y responde en el formato JSON indicado.${flexible ? FLEX_NOTE : ''}`;
 }
 
 // ---------------------------------------------------------------
@@ -345,7 +375,7 @@ async function analyzeCandles(promptText, apiKey, model) {
         parts: [{ text: promptText }]
       }
     ],
-    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    systemInstruction: { parts: [{ text: getSystemPrompt() }] },
     generationConfig: { temperature: 0.3 }
   };
 
@@ -378,7 +408,7 @@ async function analyzeCandlesOpenRouter(promptText, apiKey) {
   const body = {
     model: OPENROUTER_MODEL,
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: getSystemPrompt() },
       { role: 'user', content: promptText }
     ],
     temperature: 0.3
@@ -416,7 +446,7 @@ async function analyzeCandlesClaude(promptText, apiKey) {
   const body = {
     model: CLAUDE_MODEL,
     max_tokens: 1024,
-    system: SYSTEM_PROMPT,
+    system: getSystemPrompt(),
     messages: [{ role: 'user', content: promptText }]
   };
 
@@ -511,7 +541,7 @@ async function openaiRequest(messages, apiKey, model, maxTokens) {
 
 async function analyzeCandlesOpenAI(promptText, apiKey, model) {
   const raw = await openaiRequest(
-    [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: promptText }],
+    [{ role: 'system', content: getSystemPrompt() }, { role: 'user', content: promptText }],
     apiKey, model, 4000
   );
   return parseModelJson(raw);
@@ -720,7 +750,6 @@ const testOpenaiBtn = document.getElementById('testOpenaiBtn');
 const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 const settingsStatus = document.getElementById('settingsStatus');
 const instrumentSelect = document.getElementById('instrumentSelect');
-const timeframeSelect = document.getElementById('timeframeSelect');
 const autoModeToggle = document.getElementById('autoModeToggle');
 const intervalSelect = document.getElementById('intervalSelect');
 const activeHoursToggle = document.getElementById('activeHoursToggle');
@@ -1008,21 +1037,39 @@ async function runAnalysis({ silent = false } = {}) {
   const symbol = instrumentSelect.value;
 
   try {
-    if (!silent) setStatus('Obteniendo velas de 1H, 15M y 5M...', '');
+    if (!silent) setStatus('Obteniendo velas...', '');
     // Las 3 temporalidades se piden en paralelo para no triplicar el tiempo de espera
-    const [candles1h, candles15m, candles5m] = await Promise.all([
-      fetchCandles(symbol, '1h', settings.twelveKey, 130), // 130 velas de 1H (~5 dias) solo para calcular niveles; al modelo se le mandan las ultimas 60
-      fetchCandles(symbol, '15min', settings.twelveKey),
-      fetchCandles(symbol, '5min', settings.twelveKey)
-    ]);
+    // Marco de tiempo elegido (scalping 15M/5M/1M o intradia 1H/15M/5M). Siempre pedimos 130 velas
+    // de 1H (~5 dias) para calcular niveles diarios y de sesion; al modelo solo se le mandan las ultimas 60 de cada marco.
+    const tfMode = getTfMode();
+    const L = TF_MODES[tfMode];
+    const key = settings.twelveKey;
+    let candles1h, candlesMacro, candlesMid, candlesTrig;
+    if (tfMode === 'scalp') {
+      [candles1h, candlesMacro, candlesMid, candlesTrig] = await Promise.all([
+        fetchCandles(symbol, '1h', key, 130),
+        fetchCandles(symbol, '15min', key, 100),
+        fetchCandles(symbol, '5min', key, 60),
+        fetchCandles(symbol, '1min', key, 60)
+      ]);
+    } else {
+      [candles1h, candlesMid, candlesTrig] = await Promise.all([
+        fetchCandles(symbol, '1h', key, 130),
+        fetchCandles(symbol, '15min', key, 60),
+        fetchCandles(symbol, '5min', key, 60)
+      ]);
+      candlesMacro = candles1h;
+    }
 
     // Ventana de trading actual y si hace falta el modo flexible (ninguna señal pasada la mitad de la ventana)
     const winInfo = getWindowInfo();
     const flexible = needFlexible(winInfo);
-    const levelsText = (window.SMCLevels ? window.SMCLevels.buildLevelsText(candles1h, candles15m, candles5m) : '');
-    const promptText = buildMultiTimeframeText(symbol, candles1h.slice(-60), candles15m, candles5m, flexible, levelsText);
+    const levelsText = window.SMCLevels
+      ? window.SMCLevels.buildLevelsText({ h1: candles1h, macro: candlesMacro, mid: candlesMid, trig: candlesTrig, labels: L })
+      : '';
+    const promptText = buildMultiTimeframeText(symbol, candlesMacro.slice(-60), candlesMid, candlesTrig, flexible, levelsText, L);
 
-    if (!silent) setStatus('Analizando 1H (contexto) + 15M (zona) + 5M (gatillo)...', '');
+    if (!silent) setStatus('Analizando las 3 temporalidades...', '');
     const statusFn = silent ? null : (msg, type) => setStatus(msg, type);
     const { result, usedProvider } = consensusEnabled(settings)
       ? await analyzeWithConsensus(promptText, settings, statusFn)
@@ -1032,7 +1079,7 @@ async function runAnalysis({ silent = false } = {}) {
     addToHistory({ ...result, timestamp: Date.now(), symbol });
     renderHistory();
     if (winInfo) logWindowAnalysis(winInfo.key);
-    if (addSignalToJournal(result, symbol, usedProvider, winInfo ? winInfo.key : null, flexible)) renderJournal();
+    if (addSignalToJournal(result, symbol, usedProvider, winInfo ? winInfo.key : null, flexible, L.evalInterval)) renderJournal();
 
     if (result.veredicto === 'APTO') {
       notifyApto(result, symbol);
@@ -1338,6 +1385,20 @@ document.querySelectorAll('.preset-btn').forEach((btn) => {
 });
 
 instrumentSelect.addEventListener('change', updateAutoModeHint);
+
+const tfModeSelect = document.getElementById('tfModeSelect');
+const mtfBadge = document.getElementById('mtfBadge');
+function renderTfMode() {
+  const m = getTfMode();
+  tfModeSelect.value = m;
+  const L = TF_MODES[m];
+  mtfBadge.textContent = `${L.macro} (macro) → ${L.mid} (zona) → ${L.trig} (gatillo)`;
+}
+tfModeSelect.addEventListener('change', () => {
+  localStorage.setItem('tfMode', tfModeSelect.value);
+  renderTfMode();
+});
+renderTfMode();
 
 const maxSignalsSelect = document.getElementById('maxSignalsSelect');
 maxSignalsSelect.value = String(getMaxSignals());

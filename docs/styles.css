@@ -242,3 +242,4 @@ input:checked + .slider:before { transform: translateX(20px); }
   border-radius: 10px; cursor: pointer;
 }
 .install-btn.hidden { display: none; }
+.field .mtf-badge { margin-top: 8px; }

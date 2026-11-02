@@ -32,13 +32,12 @@
       </div>
 
       <div class="field">
-        <label>Analisis multi-temporalidad</label>
-        <select id="timeframeSelect" style="display:none">
-          <option value="5min">5 minutos</option>
-          <option value="15min" selected>15 minutos</option>
-          <option value="1h">1 hora</option>
+        <label for="tfModeSelect">Analisis multi-temporalidad</label>
+        <select id="tfModeSelect">
+          <option value="scalp">Scalping: 15M → 5M → 1M (mas operaciones)</option>
+          <option value="intra">Intradia: 1H → 15M → 5M</option>
         </select>
-        <div class="mtf-badge">1H (contexto) → 15M (zona) → 5M (gatillo)</div>
+        <div class="mtf-badge" id="mtfBadge"></div>
       </div>
 
       <div class="auto-mode-box">

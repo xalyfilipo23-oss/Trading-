@@ -104,6 +104,25 @@
     return out;
   }
 
+  // Niveles horizontales testeados varias veces: agrupa swings con precio parecido (dentro de tol)
+  function testedLevels(points, tol) {
+    const sorted = points.slice().sort((a, b) => a.price - b.price);
+    const clusters = [];
+    sorted.forEach((p) => {
+      const last = clusters[clusters.length - 1];
+      if (last && p.price - last.max <= tol) {
+        last.sum += p.price; last.count += 1; last.max = p.price; last.lastT = Math.max(last.lastT, p.t);
+      } else {
+        clusters.push({ sum: p.price, count: 1, max: p.price, lastT: p.t });
+      }
+    });
+    return clusters
+      .filter((c) => c.count >= 2)
+      .map((c) => ({ price: c.sum / c.count, count: c.count, lastT: c.lastT }))
+      .sort((a, b) => b.lastT - a.lastT)
+      .slice(0, 3);
+  }
+
   function range(cs) {
     if (!cs.length) return null;
     return { high: Math.max(...cs.map((c) => c.h)), low: Math.min(...cs.map((c) => c.l)) };
@@ -125,24 +144,30 @@
     return Math.min(Math.max(d, 2), 6);
   }
 
-  function buildLevelsText(c1hRaw, c15Raw, c5Raw) {
+  // opts: { h1, macro, mid, trig, labels: {macro, mid, trig} }  (velas crudas de Twelve Data)
+  // h1 se usa SIEMPRE para niveles diarios/sesiones; macro/mid/trig son las 3 temporalidades del analisis.
+  function buildLevelsText(opts) {
     try {
-      const h1 = toNum(c1hRaw), m15 = toNum(c15Raw), m5 = toNum(c5Raw);
-      if (!m5.length || !m15.length || !h1.length) return '';
-      const dec = decimalsOf(c5Raw);
+      const { labels } = opts;
+      const h1 = toNum(opts.h1), macro = toNum(opts.macro), mid = toNum(opts.mid), trig = toNum(opts.trig);
+      if (!h1.length || !macro.length || !mid.length || !trig.length) return '';
+      const dec = decimalsOf(opts.trig);
       const f = (n) => Number(n).toFixed(dec);
-      const nowT = m5[m5.length - 1].t;
-      const price = m5[m5.length - 1].c;
+      const nowT = trig[trig.length - 1].t;
+      const price = trig[trig.length - 1].c;
       const lines = [];
+      const L = labels;
 
-      const atr5 = atr(m5), atr15 = atr(m15), atr1h = atr(h1);
       const np = nyParts(nowT);
       const dias = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
       const wd = new Date(`${np.date}T12:00:00Z`).getUTCDay();
       lines.push(`Hora en Nueva York: ${dias[wd]} ${String(np.hour).padStart(2, '0')}:${String(np.minute).padStart(2, '0')}`);
-      lines.push(`Precio actual (ultimo cierre 5M): ${f(price)}`);
+      lines.push(`Precio actual (ultimo cierre ${L.trig}): ${f(price)}`);
       lines.push(`Sesion actual: ${sessionLabel(nowT)}`);
-      lines.push(`ATR(14): 5M=${atr5 ? f(atr5) : '-'}, 15M=${atr15 ? f(atr15) : '-'}, 1H=${atr1h ? f(atr1h) : '-'}  (sirve para juzgar si un SL/TP es realista)`);
+
+      const atrMacro = atr(macro), atrMid = atr(mid), atrTrig = atr(trig), atr1h = atr(h1);
+      const af = (v) => (v ? f(v) : '-');
+      lines.push(`ATR(14): ${L.macro}=${af(atrMacro)}, ${L.mid}=${af(atrMid)}, ${L.trig}=${af(atrTrig)}, 1H=${af(atr1h)}  (sirve para juzgar si un SL/TP es realista)`);
 
       // Rango de las ultimas 24 velas de 1H frente al ATR de 1H (valores bajos sugieren acumulacion)
       if (atr1h && h1.length >= 24) {
@@ -175,23 +200,29 @@
       if (asia) lines.push(`Rango Asia (20:00-00:00 NY): maximo ${f(asia.high)}, minimo ${f(asia.low)}`);
       if (lon) lines.push(`Rango Londres (02:00-05:00 NY) hasta ahora: maximo ${f(lon.high)}, minimo ${f(lon.low)}`);
 
-      // Swings
+      // Swings y niveles testeados varias veces en el marco macro (paso 1 del metodo)
       const fmtSw = (arr) => arr.slice(-3).map((s) => f(s.price)).join(', ') || '-';
-      const s15 = swings(m15), s1h = swings(h1);
-      lines.push(`Swing highs 15M (recientes, de mas viejo a mas nuevo): ${fmtSw(s15.highs)}`);
-      lines.push(`Swing lows 15M: ${fmtSw(s15.lows)}`);
-      lines.push(`Swing highs 1H: ${fmtSw(s1h.highs)}`);
-      lines.push(`Swing lows 1H: ${fmtSw(s1h.lows)}`);
+      const sMacro = swings(macro), sMid = swings(mid);
+      const tol = 0.3 * (atrMacro || 0);
+      const lvTxt = (arr) => testedLevels(arr, tol).map((x) => `${f(x.price)} (${x.count} toques)`).join(' | ') || 'ninguno';
+      lines.push(`Niveles testeados 2+ veces en ${L.macro} - maximos: ${lvTxt(sMacro.highs)}`);
+      lines.push(`Niveles testeados 2+ veces en ${L.macro} - minimos: ${lvTxt(sMacro.lows)}`);
+      lines.push(`Swing highs ${L.macro} (de mas viejo a mas nuevo): ${fmtSw(sMacro.highs)}`);
+      lines.push(`Swing lows ${L.macro}: ${fmtSw(sMacro.lows)}`);
+      lines.push(`Swing highs ${L.mid}: ${fmtSw(sMid.highs)}`);
+      lines.push(`Swing lows ${L.mid}: ${fmtSw(sMid.lows)}`);
 
-      // FVG y OB en 15M
-      const gaps = fvgs(m15, (atr15 || 0) * 0.25);
-      const gapTxt = (dir) => gaps.filter((g) => g.dir === dir).slice(-3).map((g) => `${f(g.bottom)}-${f(g.top)}`).join(' | ') || 'ninguno';
-      lines.push(`FVG 15M alcistas sin rellenar (parte abierta): ${gapTxt('alcista')}`);
-      lines.push(`FVG 15M bajistas sin rellenar (parte abierta): ${gapTxt('bajista')}`);
-      const obs = orderBlocks(m15, atr15);
-      const obTxt = (dir) => obs.filter((o) => o.dir === dir).slice(-2).map((o) => `${f(o.bottom)}-${f(o.top)}`).join(' | ') || 'ninguno';
-      lines.push(`Order blocks 15M candidatos alcistas no mitigados: ${obTxt('alcista')}`);
-      lines.push(`Order blocks 15M candidatos bajistas no mitigados: ${obTxt('bajista')}`);
+      // FVG y order blocks (macro y medio)
+      const gapTxt = (gaps, dir) => gaps.filter((g) => g.dir === dir).slice(-3).map((g) => `${f(g.bottom)}-${f(g.top)}`).join(' | ') || 'ninguno';
+      const obTxt = (obs, dir) => obs.filter((o) => o.dir === dir).slice(-2).map((o) => `${f(o.bottom)}-${f(o.top)}`).join(' | ') || 'ninguno';
+      [[L.macro, macro, atrMacro], [L.mid, mid, atrMid]].forEach(([name, cs, a]) => {
+        const gaps = fvgs(cs, (a || 0) * 0.25);
+        const obs = orderBlocks(cs, a);
+        lines.push(`FVG ${name} alcistas sin rellenar (parte abierta): ${gapTxt(gaps, 'alcista')}`);
+        lines.push(`FVG ${name} bajistas sin rellenar (parte abierta): ${gapTxt(gaps, 'bajista')}`);
+        lines.push(`Order blocks ${name} candidatos alcistas no mitigados: ${obTxt(obs, 'alcista')}`);
+        lines.push(`Order blocks ${name} candidatos bajistas no mitigados: ${obTxt(obs, 'bajista')}`);
+      });
 
       return `=== NIVELES CALCULADOS POR CODIGO (reglas fijas, datos objetivos) ===\n${lines.join('\n')}`;
     } catch (e) {
@@ -199,7 +230,7 @@
     }
   }
 
-  const api = { buildLevelsText, atr, swings, fvgs, orderBlocks, tradingDay, toNum, parseT, sessionLabel };
+  const api = { buildLevelsText, testedLevels, atr, swings, fvgs, orderBlocks, tradingDay, toNum, parseT, sessionLabel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SMCLevels = api;
 })(typeof window !== 'undefined' ? window : globalThis);
