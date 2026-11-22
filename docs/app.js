@@ -50,6 +50,15 @@ Dentro o junto a la zona de ${M}, el order block de ${E} es la ULTIMA vela contr
 - hay liquidez cerca (maximos o minimos iguales, swings cercanos) y el precio todavia no ha vuelto a mitigarlo.
 Es INVALIDO si el movimiento fue gradual: una "escalera" con muchas velas del mismo color, pausas y reanudaciones, poca decision. Es normal que el precio regrese a esa zona; ahi se espera la reaccion.
 
+LECTURA DE CONTEXTO Y TRAMPAS (pensar mejor que la mayoria)
+- Tendencia por estructura: una secuencia de impulso, retroceso corto, impulso, retroceso corto (maximos y minimos cada vez mas altos) es tendencia alcista; lo ideal es priorizar las compras a favor de ella (y al reves en bajista). No vendas solo porque "ya subio demasiado".
+- Las dos ideas de la mayoria: (a) "subio demasiado, viene un retroceso profundo" y vende al primer quiebre; (b) "mercado expansivo" y compra al primer rompimiento. Las dos son razonables y justo por eso la mayoria las toma y se vuelven trampas. Antes de aprobar una entrada preguntate: ¿donde estan los stops y las entradas de la mayoria?, ¿esta entrada es la prematura de la mayoria o llega DESPUES de que esa liquidez fue barrida?
+- Señales de trampa: dentro de una tendencia el precio hace minimos cada vez mas bajos y rompe estructura con cuerpo e intencion; eso atrae vendedores y compradores prematuros, y deja liquidez debajo de esos minimos (y encima de los maximos previos).
+- Entrada de mejor calidad: llega despues de barrer los stops de la mayoria (el minimo y, a veces, tambien los maximos previos), cuando "ya no quedan vendedores ni compradores apurados", y con reaccion desde un punto de interes refinado.
+- Refinar la zona: un punto de interes del marco medio (por ejemplo una resistencia rota que pasa a ser soporte, o un nivel clave) se refina en el marco de gatillo al nivel mas preciso (la vela de origen / el patron de cierre-apertura). Si el precio esta acumulado cerca, estira el patron a la vela de origen mas cercana.
+- Ejemplo tipico: tendencia alcista, el precio baja barriendo minimos y los stops de los compradores, reacciona casi al pip desde el nivel refinado; SL justo debajo del minimo del patron; TP en el siguiente maximo de estructura (puede dar 1:3 a 1:5).
+En "analisis" explica brevemente tu tesis de contexto (tendencia) y donde crees que esta la liquidez de la mayoria.
+
 PASO 3 - GATILLO Y CONFIRMACION EN ${G}
 Con el precio en la zona (${M} / ${E}) debe haber ocurrido en ${G}, en este orden:
 (a) una barrida de liquidez: el precio rompe un minimo (o maximo) reciente y lo recupera, y
