@@ -2,8 +2,8 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <meta name="theme-color" content="#131722" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0e14" />
   <title>SMC Copilot</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icons/icon192.png" />
@@ -12,137 +12,196 @@
 </head>
 <body>
   <div class="container">
-    <header>
-      <h1>SMC Copilot</h1>
-      <button id="settingsBtn" class="icon-btn" title="Configuracion">⚙</button>
+    <header class="topbar">
+      <div class="brand"><span class="logo">◆</span><h1>SMC Copilot</h1></div>
+      <div class="top-right">
+        <span id="marketPill" class="pill"></span>
+        <button id="settingsBtn" class="icon-btn" title="Configuracion">⚙</button>
+      </div>
     </header>
 
     <!-- VISTA PRINCIPAL -->
     <div id="mainView">
+      <div class="statusbar">
+        <span id="nyClock" class="mono"></span>
+        <span id="creditsChip" class="chip chip-n"></span>
+      </div>
+
       <button id="installBtn" type="button" class="install-btn hidden">📲 Instalar en tu pantalla de inicio</button>
 
-      <div class="field">
-        <label for="instrumentSelect">Instrumento</label>
-        <select id="instrumentSelect">
-          <option value="EUR/USD">EUR/USD</option>
-          <option value="XAU/USD">XAU/USD (Oro)</option>
-          <option value="GBP/USD">GBP/USD</option>
-          <option value="USD/JPY">USD/JPY</option>
-        </select>
-      </div>
-
-      <div class="field">
-        <label for="tfModeSelect">Analisis multi-temporalidad</label>
-        <select id="tfModeSelect">
-          <option value="scalp">Scalping: 15M → 5M → 1M (mas operaciones)</option>
-          <option value="intra">Intradia: 1H → 15M → 5M</option>
-        </select>
-        <div class="mtf-badge" id="mtfBadge"></div>
-      </div>
-
-      <div class="auto-mode-box">
-        <div class="auto-mode-header">
-          <span>Modo Automatico</span>
-          <label class="switch">
-            <input type="checkbox" id="autoModeToggle" />
-            <span class="slider"></span>
-          </label>
-        </div>
-        <select id="intervalSelect">
-          <option value="5">Cada 5 minutos</option>
-          <option value="15" selected>Cada 15 minutos</option>
-          <option value="30">Cada 30 minutos</option>
-        </select>
-
-        <div class="switch-row">
-          <span>Señales por dia (max.)</span>
-          <select id="maxSignalsSelect">
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="5">5</option>
-          </select>
-        </div>
-        <p class="hint">Es un tope, no una meta: el bot solo registra las que cumplen el metodo, y al llegar al maximo del dia se pausa hasta el dia siguiente. Si en la segunda mitad de la ultima ventana del dia no hay ninguna, acepta un setup razonable como calidad B (se guarda aparte para compararlo con la calidad A).</p>
-
-        <div class="switch-row">
-          <span>Mantener pantalla encendida</span>
-          <label class="switch">
-            <input type="checkbox" id="wakeLockToggle" />
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <div class="switch-row">
-          <span>Solo en horarios programados</span>
-          <label class="switch">
-            <input type="checkbox" id="activeHoursToggle" />
-            <span class="slider"></span>
-          </label>
-        </div>
-        <div id="activeHoursFields" class="hidden">
-          <label for="scheduleTz">Zona horaria de los horarios</label>
-          <select id="scheduleTz">
-            <option value="America/New_York">Nueva York (recomendado)</option>
-            <option value="Europe/London">Londres</option>
-            <option value="Asia/Tokyo">Tokio</option>
-            <option value="local">Mi hora (este dispositivo)</option>
-          </select>
-          <div id="windowsList"></div>
-          <button id="addWindowBtn" type="button" class="secondary-btn small-btn">+ Agregar horario</button>
-          <div class="preset-row">
-            <button type="button" class="preset-btn" data-start="02:00" data-end="05:00">Londres 02-05</button>
-            <button type="button" class="preset-btn" data-start="08:00" data-end="11:00">Nueva York 08-11</button>
-            <button type="button" class="preset-btn" data-start="19:00" data-end="22:00">Tokio 19-22</button>
+      <!-- ======== PANEL ======== -->
+      <section id="paneHome">
+        <div class="card hero">
+          <div class="hero-top">
+            <div>
+              <div class="eyebrow">Señales de hoy</div>
+              <div class="hero-count"><span id="todayCount" class="mono">0/2</span><span id="todayPips" class="pips"></span></div>
+            </div>
+            <div class="hero-switch">
+              <span>Automático</span>
+              <label class="switch">
+                <input type="checkbox" id="autoModeToggle" />
+                <span class="slider"></span>
+              </label>
+            </div>
           </div>
-          <p class="hint">Los atajos agregan ventanas en hora de Nueva York. Fuera de los horarios el Modo Automatico se pausa solo y no gasta creditos. Con el mercado cerrado (fin de semana) tampoco analiza.</p>
-          <p class="hint" id="scheduleNow"></p>
+          <div class="hero-meta">
+            <span id="sessionLabel" class="muted"></span>
+            <span id="strictHint" class="chip chip-a"></span>
+          </div>
+          <p class="hint" id="autoModeHint">Apagado. Analiza manualmente con el boton de abajo.</p>
+          <p class="hint warn">⚠ Funciona solo mientras la app esta abierta (aunque sea en segundo plano).</p>
         </div>
 
-        <p class="hint" id="autoModeHint">Apagado. Analiza manualmente con el boton de abajo.</p>
-        <p class="hint warn">⚠ Solo funciona mientras esta app este abierta (aunque sea en segundo plano). Si la cierras del todo, se detiene.</p>
-      </div>
-
-      <button id="analyzeBtn" class="primary-btn">Analizar ahora</button>
-
-      <div id="statusMsg" class="status-msg"></div>
-
-      <div id="resultBox" class="result-box hidden">
-        <div id="verdictBadge" class="verdict-badge"></div>
-        <div class="result-section">
-          <h3>Analisis</h3>
-          <p id="analysisText"></p>
+        <div class="card">
+          <div class="card-head">
+            <h3>Escaneo de instrumentos</h3>
+            <label class="mini-switch"><span>Rotación</span>
+              <span class="switch small"><input type="checkbox" id="rotationToggle" /><span class="slider"></span></span>
+            </label>
+          </div>
+          <p class="hint">Con la rotación activa el codigo revisa los 4 instrumentos (gratis, sin IA) y solo analiza con IA el que tiene zona y movimiento.</p>
+          <div id="scanList"></div>
+          <div id="watchList" class="hidden"></div>
         </div>
-        <div class="result-section">
-          <h3>Zona / Direccion sugerida</h3>
-          <p id="zoneText"></p>
-        </div>
-        <div id="tradePlanBox" class="trade-plan hidden">
-          <h3>Plan de Trade</h3>
-          <div class="trade-row"><span>Gatillo:</span><span id="tpGatillo"></span></div>
-          <div class="trade-row"><span>Entrada:</span><span id="tpEntrada"></span></div>
-          <div class="trade-row"><span>Stop Loss:</span><span id="tpSL"></span></div>
-          <div class="trade-row"><span>Take Profit:</span><span id="tpTP"></span></div>
-          <div class="trade-row"><span>R:R real:</span><span id="tpRR"></span></div>
-        </div>
-      </div>
 
-      <div id="journalBox">
-        <h3>Registro de señales (pruebas)</h3>
-        <p class="hint">Cada señal APTO queda guardada con su entrada, SL y TP. La app revisa las velas siguientes y marca si se cumplio el TP, si toco el SL, o si la entrada nunca se dio. No usa ninguna cuenta.</p>
-        <div id="journalSummary" class="stats"></div>
-        <div class="journal-actions">
-          <button id="refreshJournalBtn" type="button" class="secondary-btn small-btn">Actualizar resultados</button>
-          <button id="exportJournalBtn" type="button" class="secondary-btn small-btn">Exportar CSV</button>
-          <button id="clearJournalBtn" type="button" class="secondary-btn small-btn danger">Borrar</button>
+        <div class="card">
+          <div class="field">
+            <label for="instrumentSelect">Instrumento (analisis manual)</label>
+            <select id="instrumentSelect">
+              <option value="XAU/USD">XAU/USD (Oro)</option>
+              <option value="EUR/USD">EUR/USD</option>
+              <option value="GBP/JPY">GBP/JPY</option>
+              <option value="USD/JPY">USD/JPY</option>
+              <option value="GBP/USD">GBP/USD</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="tfModeSelect">Temporalidades</label>
+            <select id="tfModeSelect">
+              <option value="scalp">Scalping: 15M → 5M → 1M</option>
+              <option value="intra">Intradia: 1H → 15M → 5M</option>
+            </select>
+            <div class="mtf-badge" id="mtfBadge"></div>
+          </div>
+          <button id="analyzeBtn" class="primary-btn">Analizar ahora</button>
         </div>
-        <div id="journalList"></div>
-      </div>
 
-      <div id="historyBox">
-        <h3>Historial reciente</h3>
-        <div id="historyList"></div>
-      </div>
+        <div id="statusMsg" class="status-msg"></div>
+
+        <div id="resultBox" class="result-box hidden">
+          <div class="result-head">
+            <div id="verdictBadge" class="verdict-badge"></div>
+            <div class="chips">
+              <span id="qualityChip" class="chip hidden"></span>
+              <span id="patternChip" class="chip hidden"></span>
+            </div>
+          </div>
+          <div id="resultMeta" class="hist-meta"></div>
+          <div id="tradePlanBox" class="trade-plan hidden">
+            <div class="plan-grid">
+              <div id="planLadder" class="ladder"></div>
+              <div class="plan-rows">
+                <div class="trade-row"><span>Entrada</span><span id="tpEntrada" class="mono"></span></div>
+                <div class="trade-row"><span>Stop Loss</span><span id="tpSL" class="mono"></span></div>
+                <div class="trade-row"><span>Take Profit</span><span id="tpTP" class="mono"></span></div>
+                <div class="trade-row"><span>R:R</span><span id="tpRR" class="mono"></span></div>
+              </div>
+            </div>
+            <div class="trade-row stack"><span>Gatillo</span><span id="tpGatillo"></span></div>
+          </div>
+          <p id="faltantesText" class="note-b hidden"></p>
+          <p id="followText" class="note-follow hidden"></p>
+          <div class="result-section">
+            <h3>Análisis</h3>
+            <p id="analysisText"></p>
+          </div>
+          <div class="result-section">
+            <h3>Zona</h3>
+            <p id="zoneText"></p>
+          </div>
+        </div>
+
+        <details class="card settings-fold">
+          <summary>Horarios, tope y noticias</summary>
+          <div class="fold-body">
+            <div class="switch-row">
+              <span>Revisar cada</span>
+              <select id="intervalSelect">
+                <option value="5">5 minutos</option>
+                <option value="15" selected>15 minutos</option>
+                <option value="30">30 minutos</option>
+              </select>
+            </div>
+            <div class="switch-row">
+              <span>Señales por dia (max.)</span>
+              <select id="maxSignalsSelect">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="5">5</option>
+              </select>
+            </div>
+            <p class="hint">Es un tope, no una meta: el bot solo registra las que cumplen el metodo y, al llegar al maximo, se pausa hasta el dia siguiente.</p>
+
+            <div class="switch-row">
+              <span>Mantener pantalla encendida</span>
+              <label class="switch"><input type="checkbox" id="wakeLockToggle" /><span class="slider"></span></label>
+            </div>
+
+            <div class="switch-row">
+              <span>Solo en horarios programados</span>
+              <label class="switch"><input type="checkbox" id="activeHoursToggle" /><span class="slider"></span></label>
+            </div>
+            <div id="activeHoursFields" class="hidden">
+              <label for="scheduleTz">Zona horaria de los horarios</label>
+              <select id="scheduleTz">
+                <option value="America/New_York">Nueva York (recomendado)</option>
+                <option value="Europe/London">Londres</option>
+                <option value="Asia/Tokyo">Tokio</option>
+                <option value="local">Mi hora (este dispositivo)</option>
+              </select>
+              <div id="windowsList"></div>
+              <button id="addWindowBtn" type="button" class="secondary-btn small-btn">+ Agregar horario</button>
+              <div class="preset-row">
+                <button type="button" class="preset-btn" data-start="02:00" data-end="05:00">Londres 02-05</button>
+                <button type="button" class="preset-btn" data-start="08:00" data-end="11:00">Nueva York 08-11</button>
+                <button type="button" class="preset-btn" data-start="19:00" data-end="22:00">Tokio 19-22</button>
+              </div>
+              <p class="hint">Los atajos agregan ventanas en hora de Nueva York. Fuera de los horarios se pausa solo y no gasta creditos. Con el mercado cerrado tampoco analiza.</p>
+              <p class="hint" id="scheduleNow"></p>
+            </div>
+
+            <label for="newsInput">Noticias fuertes de hoy (hora de Nueva York, una por linea)</label>
+            <textarea id="newsInput" rows="3" placeholder="08:30 NFP&#10;14:00 FOMC"></textarea>
+            <p class="hint" id="newsHint"></p>
+          </div>
+        </details>
+      </section>
+
+      <!-- ======== DIARIO ======== -->
+      <section id="paneJournal" class="hidden">
+        <div id="journalBox" class="card">
+          <h3>Registro de señales</h3>
+          <p class="hint">Cada señal APTO queda guardada con su entrada, SL y TP. La app revisa las velas siguientes y marca si se cumplio el TP, si toco el SL o si la entrada nunca se dio. No usa ninguna cuenta.</p>
+          <div id="journalSummary" class="stats"></div>
+          <div class="journal-actions">
+            <button id="refreshJournalBtn" type="button" class="secondary-btn small-btn">Actualizar</button>
+            <button id="exportJournalBtn" type="button" class="secondary-btn small-btn">Exportar CSV</button>
+            <button id="clearJournalBtn" type="button" class="secondary-btn small-btn danger">Borrar</button>
+          </div>
+          <div id="journalList"></div>
+        </div>
+        <div id="historyBox" class="card">
+          <h3>Historial reciente</h3>
+          <div id="historyList"></div>
+        </div>
+      </section>
+
+      <nav class="tabbar">
+        <button type="button" class="tab-btn active" data-tab="home"><span class="tab-ico">◉</span>Panel</button>
+        <button type="button" class="tab-btn" data-tab="journal"><span class="tab-ico">☰</span>Diario</button>
+      </nav>
     </div>
 
     <!-- VISTA DE CONFIGURACION -->

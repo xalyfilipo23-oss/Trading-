@@ -123,6 +123,106 @@
       .slice(0, 3);
   }
 
+
+  // Quita la ultima vela si todavia se esta formando (su hora + duracion es posterior a "ahora").
+  // Asi todo el analisis trabaja solo con velas CERRADAS.
+  function closedOnly(candles, stepMs, nowMs) {
+    const now = nowMs === undefined ? Date.now() : nowMs;
+    if (!candles || !candles.length) return candles || [];
+    const t = parseT(candles[candles.length - 1].datetime);
+    return (Number.isFinite(t) && t + stepMs > now) ? candles.slice(0, -1) : candles;
+  }
+
+  // Estado del mercado calculado por CODIGO (sin IA): ¿acumulacion?, ¿cerca de una zona testeada?,
+  // y como llega el precio a esa zona (los dos patrones del usuario):
+  //  - 'dificultad': velas pequeñas y lentas con muchas mechas -> probable barrido de liquidez
+  //  - 'zona_en_prueba': velas casi enteras que tocan la zona, la cruzan poco y vuelven (2+ veces) -> amague
+  //  - 'barrido': una vela con mecha larga paso la zona y cerro de vuelta (posible gatillo)
+  //  - 'limpio': ninguno de los anteriores
+  // macroRaw: velas del marco macro (ATR, rango, niveles). midRaw: velas del marco medio (llegada al nivel).
+  function marketState(macroRaw, midRaw) {
+    const macro = toNum(macroRaw), mid = toNum(midRaw);
+    if (macro.length < 30 || mid.length < 12) return null;
+    const a = atr(macro);
+    if (!a) return null;
+    const am = atr(mid) || a * 0.4;
+    const price = mid[mid.length - 1].c;
+
+    const r16 = range(macro.slice(-16));
+    const rangeAtr = (r16.high - r16.low) / a;
+    const disp = macro.slice(-12).filter((c) => (c.h - c.l) >= 1.6 * a && Math.abs(c.c - c.o) >= 0.55 * (c.h - c.l)).length;
+    const accumulation = rangeAtr < 3.5 && disp === 0;
+
+    const sw = swings(macro);
+    const tol = 0.3 * a;
+    const levels = testedLevels(sw.highs, tol).map((x) => ({ ...x, type: 'maximo' }))
+      .concat(testedLevels(sw.lows, tol).map((x) => ({ ...x, type: 'minimo' })));
+    let level = null;
+    levels.forEach((lv) => {
+      const d = Math.abs(price - lv.price) / a;
+      if (!level || d < level.dist) level = { ...lv, dist: d };
+    });
+    const near = !!level && level.dist <= 1.2;
+
+    let pattern = 'limpio', touches = 0, sweep = false, bodyNear = null;
+    if (level) {
+      const L = level.price, high = level.type === 'maximo';
+      const last = mid.slice(-12);
+      const ext = (c) => (high ? c.h : c.l);
+      const near05 = last.filter((c) => Math.abs(ext(c) - L) <= 0.5 * am);
+      touches = near05.length;
+      const bodyRatio = (c) => ((c.h - c.l) > 0 ? Math.abs(c.c - c.o) / (c.h - c.l) : 0);
+      bodyNear = near05.length ? near05.reduce((x, c) => x + bodyRatio(c), 0) / near05.length : null;
+      sweep = mid.slice(-3).some((c) => {
+        const rng = c.h - c.l;
+        if (rng <= 0) return false;
+        const wick = high ? c.h - Math.max(c.o, c.c) : Math.min(c.o, c.c) - c.l;
+        const through = high ? (c.h > L && c.c < L) : (c.l < L && c.c > L);
+        return through && wick / rng >= 0.55;
+      });
+      const last6 = mid.slice(-6);
+      const body6 = last6.reduce((x, c) => x + bodyRatio(c), 0) / last6.length;
+      const close6 = last6.filter((c) => Math.abs(ext(c) - L) <= 1.2 * am).length;
+      if (sweep) pattern = 'barrido';
+      else if (touches >= 2 && bodyNear !== null && bodyNear >= 0.6) pattern = 'zona_en_prueba';
+      else if (body6 <= 0.42 && close6 >= 4) pattern = 'dificultad';
+    }
+
+    const pass = !accumulation && (near || sweep);
+    let score = 0;
+    if (!accumulation) score += Math.min(rangeAtr / 6, 1) + Math.min(disp, 2) * 0.5;
+    if (level && near) score += 2 * (1.2 - level.dist) / 1.2;
+    if (sweep) score += 1;
+    let reason;
+    if (accumulation) reason = `acumulacion (rango ${rangeAtr.toFixed(1)} ATR, sin desplazamientos)`;
+    else if (!near && !sweep) reason = 'lejos de zonas testeadas';
+    else reason = `cerca de zona ${level.price.toFixed(5).replace(/0+$/, '')} (${level.count} toques)`;
+    return { accumulation, rangeAtr, disp, atr: a, price, level, near, sweep, touches, pattern, bodyNear, pass, score, reason };
+  }
+
+  const PATTERN_TXT = {
+    limpio: 'limpio (llegada sin señales de trampa)',
+    dificultad: 'DIFICULTAD (velas pequeñas y lentas con mechas: probable barrido de liquidez, no confies en la ruptura)',
+    zona_en_prueba: 'ZONA EN PRUEBA (velas casi enteras que tocan la zona, la cruzan poco y vuelven: posible amague antes de un barrido)',
+    barrido: 'BARRIDO (mecha larga que paso la zona y cerro de vuelta: posible gatillo, busca la confirmacion)'
+  };
+
+  // Confirmacion de entrada en el marco de gatillo (1M en scalping): la ULTIMA vela cerrada cierra con
+  // cuerpo mas alla del nivel en la direccion del trade, y la anterior no habia cerrado ya de ese lado.
+  // "big" = la vela es enorme (rango > 2.5 ATR): perseguirla arruina el R:R (noticias / inyeccion de capital).
+  function confirmation(trigRaw, level, dir) {
+    const cs = toNum(trigRaw);
+    if (cs.length < 16) return null;
+    const a = atr(cs.slice(0, -1));
+    const c = cs[cs.length - 1], p = cs[cs.length - 2];
+    const rng = c.h - c.l, body = Math.abs(c.c - c.o);
+    const long = dir === 'LONG';
+    const beyond = long ? (c.c > level && c.c > c.o) : (c.c < level && c.c < c.o);
+    const bodyOk = rng > 0 && body / rng >= 0.5;
+    const fresh = long ? p.c <= level : p.c >= level;
+    return { t: c.t, close: c.c, confirmed: beyond && bodyOk && fresh, big: a ? rng > 2.5 * a : false, rngAtr: a ? rng / a : null, atr: a };
+  }
+
   function range(cs) {
     if (!cs.length) return null;
     return { high: Math.max(...cs.map((c) => c.h)), low: Math.min(...cs.map((c) => c.l)) };
@@ -224,13 +324,21 @@
         lines.push(`Order blocks ${name} candidatos bajistas no mitigados: ${obTxt(obs, 'bajista')}`);
       });
 
+      const st = marketState(opts.macro, opts.mid);
+      if (st) {
+        lines.push(`ESTADO DEL MERCADO (codigo): ${st.accumulation ? 'ACUMULACION / rango comprimido' : 'con movimiento'} (rango ultimas 16 velas ${L.macro} = ${st.rangeAtr.toFixed(1)} x ATR, ${st.disp} desplazamientos recientes)`);
+        if (st.level) {
+          lines.push(`Zona testeada mas cercana: ${f(st.level.price)} (${st.level.type}, ${st.level.count} toques), a ${st.level.dist.toFixed(2)} ATR(${L.macro}) del precio`);
+          lines.push(`Patron de llegada al nivel (${L.mid}, ${st.touches} velas tocando la zona): ${PATTERN_TXT[st.pattern]}`);
+        }
+      }
       return `=== NIVELES CALCULADOS POR CODIGO (reglas fijas, datos objetivos) ===\n${lines.join('\n')}`;
     } catch (e) {
       return ''; // si algo falla, el analisis sigue sin esta seccion
     }
   }
 
-  const api = { buildLevelsText, testedLevels, atr, swings, fvgs, orderBlocks, tradingDay, toNum, parseT, sessionLabel };
+  const api = { buildLevelsText, testedLevels, atr, swings, fvgs, orderBlocks, tradingDay, toNum, parseT, sessionLabel, closedOnly, marketState, confirmation };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SMCLevels = api;
 })(typeof window !== 'undefined' ? window : globalThis);

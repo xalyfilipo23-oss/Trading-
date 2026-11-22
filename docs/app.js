@@ -50,44 +50,57 @@ Dentro o junto a la zona de ${M}, el order block de ${E} es la ULTIMA vela contr
 - hay liquidez cerca (maximos o minimos iguales, swings cercanos) y el precio todavia no ha vuelto a mitigarlo.
 Es INVALIDO si el movimiento fue gradual: una "escalera" con muchas velas del mismo color, pausas y reanudaciones, poca decision. Es normal que el precio regrese a esa zona; ahi se espera la reaccion.
 
-PASO 3 - GATILLO EN ${G} (confirmacion)
+PASO 3 - GATILLO Y CONFIRMACION EN ${G}
 Con el precio en la zona (${M} / ${E}) debe haber ocurrido en ${G}, en este orden:
 (a) una barrida de liquidez: el precio rompe un minimo (o maximo) reciente y lo recupera, y
-(b) un CHoCH: ruptura de la estructura de ${G} en la direccion contraria al movimiento previo (cambio de tendencia), idealmente con un desplazamiento fuerte que deje un FVG a favor de la nueva direccion.
-Sin barrida y CHoCH confirmados NO hay entrada. No te adelantes al gatillo: si falta, el veredicto es NO APTO.
+(b) la CONFIRMACION: una vela de ${G} cierra CON CUERPO (cuerpo de al menos 50% del rango; no una vela de pura mecha) mas alla del ultimo extremo relevante, en la direccion del trade (compras: cierra por encima del ultimo maximo; ventas: por debajo del ultimo minimo), idealmente con un desplazamiento fuerte que deje un FVG a favor. Es un CHoCH confirmado por cierre.
+El usuario entra A MERCADO en la vela siguiente a esa confirmacion: la entrada es aproximadamente el cierre de la vela de confirmacion.
+Sin barrida y confirmacion por cierre NO hay entrada. Si el contexto es valido y la barrida ya ocurrio (o esta ocurriendo) pero la vela de confirmacion todavia no cierra, el veredicto es NO APTO pero activa "seguimiento" (ver abajo).
+
+PATRONES DE LLEGADA A LA ZONA (la seccion NIVELES CALCULADOS trae el patron medido por codigo; usalo)
+- DIFICULTAD: el precio llega al nivel que necesita romper con velas pequeñas y lentas, con muchas mechas de rechazo. Segun el usuario es toma de liquidez: la ruptura aparente suele fallar y el movimiento real es el CONTRARIO. No entres en la direccion de esa ruptura.
+- ZONA EN PRUEBA: velas casi enteras (casi sin mecha) tocan la zona, la cruzan poco y vuelven, varias veces. Es un amague para que la gente tome el lado equivocado; despues suele venir una vela grande con mecha enorme que barre el nivel, cierra de vuelta y el precio se va al lado contrario. Mientras solo haya toques NO hay entrada; la señal es el barrido final con cierre de vuelta + la confirmacion.
+- BARRIDO: ya hubo una vela con mecha larga que paso la zona y cerro de vuelta: busca la vela de confirmacion.
+- LIMPIO: sin señales de trampa.
+Son hipotesis del usuario basadas en su experiencia: aplicalas, pero juzga con las velas.
 
 PASO 4 - PLAN DE TRADE (solo si hay APTO)
-- Entrada: en el FVG que dejo el desplazamiento del CHoCH (o, si no hay FVG, en el order block de ${G} que lo origino), esperando el retroceso hacia ese punto. Puede ser un precio limite distinto del precio actual. Si el precio ya se alejo mas de aproximadamente 1 ATR(5M) de ese punto sin retroceder, no persigas la entrada: NO APTO.
-- Stop loss: mas alla del ultimo extremo: debajo del ultimo minimo (el de la barrida) para compras, encima del ultimo maximo para ventas, en un precio que el mercado aun no ha alcanzado, con un pequeno margen para que no lo toque una mecha normal (referencia: 0.1 a 0.25 ATR de 5M). Si no hay un ultimo extremo claro, ponlo mas alla del order block.
-- Take profit: el FVG o el order block opuesto mas cercano en la direccion del trade (primera meta). Relacion riesgo:beneficio MINIMA de 1:2 (lo ideal es de 1:2 a 1:3). Si la primera meta no da 1:2, usa la siguiente meta alcanzable; si ninguna alcanzable da al menos 1:2, NO APTO. Nunca propongas 1:1. Menciona en el analisis las metas siguientes, por si el precio las alcanza.
+- Entrada: a mercado, en el cierre de la vela de confirmacion de ${G} (tipoEntrada = "mercado"). Si la vela de confirmacion es enorme (rango mayor a unas 2.5 veces el ATR de ${G}), no persigas: NO APTO.
+- Stop loss: mas alla del ultimo extremo: debajo del ultimo minimo (el de la barrida) para compras, encima del ultimo maximo para ventas, en un precio que el mercado aun no ha alcanzado, con un pequeno margen para que no lo toque una mecha normal (referencia: 0.1 a 0.25 ATR de ${E}). Si no hay un ultimo extremo claro, ponlo mas alla del order block.
+- Take profit: el FVG o el order block opuesto mas cercano en la direccion del trade (primera meta). Relacion riesgo:beneficio MINIMA de 1:2 calculada desde la entrada a mercado (lo ideal es de 1:2 a 1:3). Si la primera meta no da 1:2, usa la siguiente meta alcanzable; si ninguna alcanzable da al menos 1:2, NO APTO. Nunca propongas 1:1. Menciona las metas siguientes.
+
+CRITERIOS: CRITICOS Y DESEABLES (no dejes pasar una buena entrada por exigir la perfeccion)
+- CRITICOS (si falta alguno: NO APTO): zona macro testeada; barrida de liquidez + confirmacion por cierre con cuerpo; SL logico mas alla del extremo; R:R de al menos 1:2; el mercado NO esta en acumulacion; el patron de llegada no es DIFICULTAD / ZONA EN PRUEBA sin barrido final.
+- DESEABLES (restan calidad pero NO bloquean): FVG dejado por el desplazamiento; order block perfecto en ${E}; buena sesion/horario; confluencia extra (liquidez del dia o de sesion barrida); meta de TP clara en un FVG/OB.
+- Calidad "A": criticos + todos o casi todos los deseables. Calidad "B": criticos cumplidos pero faltan 1 o 2 deseables. Una B ES una buena entrada: marcala APTO, y en "faltantes" di exactamente que le falta. Si hay duda de que cumpla los CRITICOS, entonces es NO APTO.
+
+SEGUIMIENTO (cuando falta solo la confirmacion)
+Si zona, barrida/contexto son validos pero la vela de confirmacion aun no cerro: veredicto NO APTO y "seguimiento": {"activar": true, "direccion": "LONG" o "SHORT", "nivel": precio que la vela de ${G} debe CERRAR mas alla (con cuerpo), "condicion": frase breve}. El codigo vigilara ${G} y te volvera a llamar cuando ocurra. Si no aplica, "seguimiento": null.
 
 CUANDO NO OPERAR (NO APTO)
-- Mercado en ACUMULACION o rango sin direccion clara: precio comprimido, velas pequenas, sin desplazamientos, swings sin progresion. Segun el usuario esto es habitual el lunes, el martes y el miercoles hasta la tarde; los movimientos direccionales (distribucion) suelen empezar el miercoles por la tarde, hora de Nueva York. Si estas en ese tramo, exige evidencia mucho mas fuerte de que NO es acumulacion.
+- Mercado en ACUMULACION o rango sin direccion clara: precio comprimido, velas pequeñas, sin desplazamientos, swings sin progresion. Segun el usuario esto es habitual el lunes, el martes y el miercoles hasta la tarde; los movimientos direccionales (distribucion) suelen empezar el miercoles por la tarde, hora de Nueva York. El mensaje del usuario indica la exigencia del dia.
 - No hay zona macro valida, order block valido o gatillo completo.
 - La relacion riesgo:beneficio posible es menor a 1:2.
 - El precio esta lejos de la zona, o el setup ya se invalido, o los datos son insuficientes o contradictorios.
-(Unica excepcion: si el mensaje del usuario activa expresamente el MODO FLEXIBLE, sigue sus instrucciones para marcar setups de calidad B.)
 
-FORMATO DEL PLAN (solo si el veredicto es APTO), usando precios numericos coherentes con los datos de ${G}:
-- gatillo: la condicion exacta que confirmo la entrada (barrida + CHoCH, con precios).
-- entrada, stopLoss, takeProfit: precios numericos.
-- rrReal: la relacion riesgo:beneficio real resultante (ej. "2.5:1").
-Si el veredicto es NO APTO, deja gatillo, entrada, stopLoss, takeProfit y rrReal como null.
-
-Responde EXCLUSIVAMENTE en el siguiente formato JSON, sin texto adicional antes ni despues, sin bloques de markdown:
+Responde EXCLUSIVAMENTE en el siguiente formato JSON, sin texto adicional antes ni despues, sin bloques de markdown. Si el veredicto es NO APTO, deja gatillo, entrada, stopLoss, takeProfit, rrReal, tipoEntrada y faltantes como null.
 
 {
   "veredicto": "APTO" o "NO APTO",
   "direccion": "LONG", "SHORT", o "NINGUNA",
   "confianza": numero del 1 al 10,
-  "calidad": "A" (zona macro + order block valido + barrida y CHoCH confirmados), "B" (solo si el mensaje activa el MODO FLEXIBLE y el setup es razonable pero incompleto), o null si es NO APTO,
-  "analisis": "Explicacion breve (4-6 frases): la zona macro de ${M}, el order block de ${E} y si es valido, si hubo o no barrida y CHoCH en ${G}, si el mercado parece en acumulacion, y por que llegas a este veredicto.",
+  "calidad": "A", "B", o null si es NO APTO,
+  "patron": "limpio", "dificultad", "zona_en_prueba" o "barrido" (el patron de llegada que observas),
+  "analisis": "Explicacion breve (4-6 frases): la zona macro de ${M}, el order block de ${E} y si es valido, el patron de llegada, si hubo barrida y confirmacion en ${G}, si el mercado parece en acumulacion, y por que llegas a este veredicto.",
   "zona": "Descripcion breve de la zona (${M} / ${E}) con precios.",
-  "gatillo": "string o null",
+  "gatillo": "la condicion exacta que confirmo la entrada (barrida + cierre con cuerpo, con precios) o null",
+  "tipoEntrada": "mercado" o null,
   "entrada": "numero (string) o null",
   "stopLoss": "numero (string) o null",
   "takeProfit": "numero (string) o null",
-  "rrReal": "string o null"
+  "rrReal": "string (ej. 2.5:1) o null",
+  "faltantes": "string con los criterios deseables que faltan (calidad B) o null",
+  "seguimiento": null o {"activar": true, "direccion": "LONG"/"SHORT", "nivel": "numero (string)", "condicion": "string"}
 }`;
 }
 
@@ -168,7 +181,7 @@ function isOpenSignal(j) {
   return j.status === 'pendiente' || j.status === 'activa';
 }
 
-function addSignalToJournal(result, symbol, provider, windowKey = null, flexible = false, evalInterval = '5min') {
+function addSignalToJournal(result, symbol, provider, windowKey = null, flexible = false, evalInterval = '5min', extra = {}) {
   if (!result || result.veredicto !== 'APTO') return false;
   const dir = result.direccion;
   if (dir !== 'LONG' && dir !== 'SHORT') return false;
@@ -205,8 +218,13 @@ function addSignalToJournal(result, symbol, provider, windowKey = null, flexible
     tfMode: (typeof getTfMode === 'function') ? getTfMode() : '',
     windowKey,
     provider: provider || '',
-    status: 'pendiente',
-    activatedAt: null,
+    patron: result.patron || extra.patron || '',
+    tipoEntrada: result.tipoEntrada || 'limite',
+    faltantes: result.faltantes || '',
+    estricto: extra.estricto || '',
+    origen: extra.origen || '',
+    status: (result.tipoEntrada === 'mercado') ? 'activa' : 'pendiente',
+    activatedAt: (result.tipoEntrada === 'mercado') ? Date.now() : null,
     closedAt: null,
     resultR: null,
     ambigua: false
@@ -273,13 +291,44 @@ function evaluateSignal(j, candles) {
 }
 
 // Pide 5M suficientes para cubrir desde la señal abierta mas vieja hasta ahora
+// Limitador de peticiones: el plan gratis de Twelve Data permite 8 creditos por minuto (1 por peticion).
+// Se mide con performance.now() para no depender del reloj del sistema. Tambien cuenta los creditos del dia.
+const tdStamps = [];
+const STEP_MS = { '1min': 60000, '5min': 300000, '15min': 900000, '1h': 3600000 };
+
+function bumpCredit() {
+  const day = new Date().toISOString().slice(0, 10);
+  let c = { day, n: 0 };
+  try { const x = JSON.parse(localStorage.getItem('tdCredits') || 'null'); if (x && x.day === day) c = x; } catch (e) { /* nuevo dia */ }
+  c.n += 1;
+  localStorage.setItem('tdCredits', JSON.stringify(c));
+  if (typeof renderCredits === 'function') renderCredits();
+}
+
+async function tdThrottle() {
+  const per = Number(localStorage.getItem('tdPerMin')) || 8;
+  for (;;) {
+    const now = performance.now();
+    while (tdStamps.length && now - tdStamps[0] > 60000) tdStamps.shift();
+    if (tdStamps.length < per) break;
+    await new Promise((r) => setTimeout(r, Math.max(300, 60000 - (now - tdStamps[0]) + 200)));
+  }
+  tdStamps.push(performance.now());
+  bumpCredit();
+}
+
+async function tdGet(url) {
+  await tdThrottle();
+  const response = await fetch(url);
+  return response.json();
+}
+
 async function fetchCandlesSince(symbol, sinceMs, apiKey, interval = '5min') {
   const step = interval === '1min' ? 60 * 1000 : FIVE_MIN;
   const startMs = (Math.floor(sinceMs / step) + 1) * step;
   const count = Math.min(5000, Math.ceil((Date.now() - startMs) / step) + 5);
   const url = `${TWELVEDATA_BASE}?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=${Math.max(count, 10)}&timezone=UTC&apikey=${apiKey}`;
-  const response = await fetch(url);
-  const data = await response.json();
+  const data = await tdGet(url);
   if (data.status === 'error' || !data.values) {
     throw new Error('Error de Twelve Data: ' + (data.message || 'No se recibieron velas.'));
   }
@@ -329,15 +378,16 @@ async function evaluateOpenSignals({ silent = true } = {}) {
 async function fetchCandles(symbol, interval, apiKey, outputsize = 60) {
   // timezone=UTC para que las horas de las velas sean siempre UTC (los niveles por sesion dependen de eso)
   const url = `${TWELVEDATA_BASE}?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=${outputsize}&timezone=UTC&apikey=${apiKey}`;
-  const response = await fetch(url);
-  const data = await response.json();
+  const data = await tdGet(url);
 
   if (data.status === 'error' || !data.values) {
     throw new Error('Error de Twelve Data: ' + (data.message || 'No se recibieron velas.'));
   }
 
-  // Twelve Data devuelve mas reciente primero — lo invertimos a orden cronologico
-  return data.values.slice().reverse();
+  // Twelve Data devuelve mas reciente primero — lo invertimos a orden cronologico.
+  // Se descarta la ultima vela si aun se esta formando: el analisis solo usa velas CERRADAS.
+  const ordered = data.values.slice().reverse();
+  return window.SMCLevels ? window.SMCLevels.closedOnly(ordered, STEP_MS[interval] || 60000) : ordered;
 }
 
 function candlesToText(candles) {
@@ -346,11 +396,7 @@ function candlesToText(candles) {
     .join('\n');
 }
 
-const FLEX_NOTE = `
-
-MODO FLEXIBLE ACTIVADO: en esta ventana de trading todavia no se ha registrado ninguna señal. Si hay un setup razonable (zona macro valida, order block valido y el precio reaccionando en o cerca de la zona, aunque el gatillo (barrida + CHoCH) no sea perfecto o completo), puedes marcarlo APTO con calidad "B" y un plan concreto (entrada, SL y TP con R:R de al menos 1.5:1). Si el gatillo SI esta completo, usa calidad "A". Si no hay nada razonable, marca NO APTO. Nunca inventes una entrada que no tenga sentido con los datos.`;
-
-function buildMultiTimeframeText(symbol, candlesMacro, candlesMid, candlesTrig, flexible = false, levelsText = '', L = TF_MODES.intra) {
+function buildMultiTimeframeText(symbol, candlesMacro, candlesMid, candlesTrig, note = '', levelsText = '', L = TF_MODES.intra) {
   return `Instrumento: ${symbol}
 
 === VELAS ${L.macro} (MACRO - zona de liquidez / order block macro) ===
@@ -362,7 +408,7 @@ ${candlesToText(candlesMid)}
 === VELAS ${L.trig} (GATILLO - confirmacion de entrada) ===
 ${candlesToText(candlesTrig)}
 ${levelsText ? '\n' + levelsText + '\n' : ''}
-Analiza las tres temporalidades con el metodo indicado, de mayor a menor (${L.macro} macro, ${L.mid} medio, ${L.trig} gatillo), y responde en el formato JSON indicado.${flexible ? FLEX_NOTE : ''}`;
+Analiza las tres temporalidades con el metodo indicado, de mayor a menor (${L.macro} macro, ${L.mid} medio, ${L.trig} gatillo), y responde en el formato JSON indicado.${note ? '\n\n' + note : ''}`;
 }
 
 // ---------------------------------------------------------------
@@ -498,7 +544,13 @@ function parseModelJson(rawContent) {
       entrada: parsed.entrada || null,
       stopLoss: parsed.stopLoss || null,
       takeProfit: parsed.takeProfit || null,
-      rrReal: parsed.rrReal || null
+      rrReal: parsed.rrReal || null,
+      patron: ['limpio', 'dificultad', 'zona_en_prueba', 'barrido'].includes(parsed.patron) ? parsed.patron : null,
+      tipoEntrada: parsed.tipoEntrada === 'mercado' ? 'mercado' : (parsed.tipoEntrada === 'limite' ? 'limite' : null),
+      faltantes: parsed.faltantes || null,
+      seguimiento: (parsed.seguimiento && parsed.seguimiento.activar)
+        ? { activar: true, direccion: parsed.seguimiento.direccion, nivel: String(parsed.seguimiento.nivel), condicion: parsed.seguimiento.condicion || '' }
+        : null
     };
   } catch (e) {
     return {
@@ -586,7 +638,8 @@ function posStr(r) {
 function slimResult(r) {
   return {
     veredicto: r.veredicto, direccion: r.direccion, analisis: r.analisis, zona: r.zona,
-    gatillo: r.gatillo, entrada: r.entrada, stopLoss: r.stopLoss, takeProfit: r.takeProfit, rrReal: r.rrReal
+    gatillo: r.gatillo, entrada: r.entrada, stopLoss: r.stopLoss, takeProfit: r.takeProfit, rrReal: r.rrReal,
+    calidad: r.calidad, patron: r.patron, faltantes: r.faltantes, seguimiento: r.seguimiento
   };
 }
 
@@ -619,12 +672,25 @@ function mergeAgreed(c, o, via, trail) {
     analisis: `CONSENSO ${via}: Claude y ChatGPT coinciden en ${posStr(c)}. ${trail}\n\n${c.analisis}`,
     zona: c.zona,
     gatillo: c.gatillo,
+    patron: c.patron || o.patron || null,
+    tipoEntrada: c.tipoEntrada || o.tipoEntrada || null,
+    faltantes: c.faltantes || o.faltantes || null,
     entrada: c.entrada,
     stopLoss: c.stopLoss,
     takeProfit: Number.isFinite(tp) ? tp.toFixed(dec) : c.takeProfit,
     rrReal: rr !== null ? `${(Math.round(rr * 10) / 10)}:1` : c.rrReal,
     consenso: via
   };
+}
+
+// Seguimiento (vigilar la confirmacion): se activa si alguno lo pide; si los dos lo piden en direcciones distintas, no.
+function validSeg(r) {
+  const sg = r && r.seguimiento;
+  return !!(sg && sg.activar && (sg.direccion === 'LONG' || sg.direccion === 'SHORT') && Number.isFinite(parseFloat(sg.nivel)));
+}
+function pickSeguimiento(c, o) {
+  if (validSeg(c) && validSeg(o)) return c.seguimiento.direccion === o.seguimiento.direccion ? c.seguimiento : null;
+  return validSeg(c) ? c.seguimiento : (validSeg(o) ? o.seguimiento : null);
 }
 
 function mergeNoApto(c, o, via, trail, label) {
@@ -636,6 +702,8 @@ function mergeNoApto(c, o, via, trail, label) {
     analisis: `${label} ${via}: ${trail}\n\nClaude: ${c.analisis}\n\nChatGPT: ${o.analisis}`,
     zona: c.zona,
     gatillo: null, entrada: null, stopLoss: null, takeProfit: null, rrReal: null,
+    patron: c.patron || o.patron || null,
+    seguimiento: pickSeguimiento(c, o),
     consenso: via
   };
 }
@@ -772,6 +840,24 @@ const tpSL = document.getElementById('tpSL');
 const tpTP = document.getElementById('tpTP');
 const tpRR = document.getElementById('tpRR');
 const historyList = document.getElementById('historyList');
+const resultMeta = document.getElementById('resultMeta');
+const qualityChip = document.getElementById('qualityChip');
+const patternChip = document.getElementById('patternChip');
+const faltantesText = document.getElementById('faltantesText');
+const followText = document.getElementById('followText');
+const planLadder = document.getElementById('planLadder');
+const nyClock = document.getElementById('nyClock');
+const marketPill = document.getElementById('marketPill');
+const creditsChip = document.getElementById('creditsChip');
+const todayPips = document.getElementById('todayPips');
+const todayCount = document.getElementById('todayCount');
+const sessionLabelEl = document.getElementById('sessionLabel');
+const strictHint = document.getElementById('strictHint');
+const scanList = document.getElementById('scanList');
+const watchList = document.getElementById('watchList');
+const rotationToggle = document.getElementById('rotationToggle');
+const newsInput = document.getElementById('newsInput');
+const newsHint = document.getElementById('newsHint');
 
 function setStatus(msg, type) {
   statusMsg.textContent = msg;
@@ -787,23 +873,53 @@ function showMain() {
   mainView.classList.remove('hidden');
 }
 
-function displayResult(result) {
-  verdictBadge.textContent = result.veredicto + (result.direccion !== 'NINGUNA' ? ' — ' + result.direccion : '');
-  verdictBadge.className = 'verdict-badge ' + (result.veredicto === 'APTO' ? 'apto' : 'no-apto');
-  analysisText.textContent = result.analisis + (result.confianza ? `\n\nConfianza: ${result.confianza}/10` : '');
-  zoneText.textContent = result.zona;
+const PATTERN_LABEL = { limpio: 'Llegada limpia', dificultad: 'Llegada con dificultad', zona_en_prueba: 'Zona en prueba', barrido: 'Barrido hecho' };
 
-  if (result.veredicto === 'APTO' && result.entrada) {
+function displayResult(result, symbol) {
+  const apto = result.veredicto === 'APTO';
+  verdictBadge.textContent = result.veredicto + (result.direccion !== 'NINGUNA' ? ' — ' + result.direccion : '');
+  verdictBadge.className = 'verdict-badge ' + (apto ? 'apto' : 'no-apto') + (apto && result.direccion === 'SHORT' ? ' short' : '');
+  resultMeta.textContent = `${symbol || instrumentSelect.value} · ${new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}${result.consenso ? ' · ' + result.consenso : ''}`;
+  analysisText.textContent = result.analisis + (result.confianza ? `\n\nConfianza: ${result.confianza}/10` : '');
+  zoneText.textContent = result.zona || '—';
+
+  qualityChip.textContent = result.calidad ? `Calidad ${result.calidad}` : '';
+  qualityChip.className = 'chip ' + (result.calidad === 'A' ? 'chip-a' : result.calidad === 'B' ? 'chip-b' : 'hidden');
+  patternChip.textContent = PATTERN_LABEL[result.patron] || '';
+  patternChip.className = 'chip chip-p-' + (result.patron || 'none') + (PATTERN_LABEL[result.patron] ? '' : ' hidden');
+  faltantesText.textContent = result.faltantes ? `Le falta: ${result.faltantes}` : '';
+  faltantesText.classList.toggle('hidden', !result.faltantes);
+  const sg = (!apto && validSeg(result)) ? result.seguimiento : null;
+  followText.textContent = sg ? `👁 Vigilando 1M: ${sg.direccion} si una vela cierra con cuerpo ${sg.direccion === 'LONG' ? 'sobre' : 'bajo'} ${sg.nivel}. ${sg.condicion || ''}` : '';
+  followText.classList.toggle('hidden', !sg);
+
+  if (apto && result.entrada) {
     tpGatillo.textContent = result.gatillo || '—';
-    tpEntrada.textContent = result.entrada;
+    tpEntrada.textContent = result.entrada + (result.tipoEntrada === 'mercado' ? '  (a mercado)' : '');
     tpSL.textContent = result.stopLoss || '—';
     tpTP.textContent = result.takeProfit || '—';
     tpRR.textContent = result.rrReal || '—';
+    renderLadder(result);
     tradePlanBox.classList.remove('hidden');
   } else {
     tradePlanBox.classList.add('hidden');
   }
   resultBox.classList.remove('hidden');
+}
+
+// Escalera visual TP / Entrada / SL (altura proporcional al precio)
+function renderLadder(r) {
+  const e = parseFloat(r.entrada), sl = parseFloat(r.stopLoss), tp = parseFloat(r.takeProfit);
+  planLadder.innerHTML = '';
+  if (![e, sl, tp].every(Number.isFinite)) return;
+  const hi = Math.max(e, sl, tp), lo = Math.min(e, sl, tp), span = hi - lo || 1;
+  [['TP', tp, 'lad-tp'], ['Entrada', e, 'lad-e'], ['SL', sl, 'lad-sl']].forEach(([label, price, cls]) => {
+    const row = el('div', 'lad ' + cls);
+    row.style.top = (10 + ((hi - price) / span) * 80).toFixed(1) + '%';
+    row.appendChild(el('span', 'lad-l', label));
+    row.appendChild(el('span', 'lad-p', fmtPrice(price)));
+    planLadder.appendChild(row);
+  });
 }
 
 function renderHistory() {
@@ -839,7 +955,7 @@ function renderHistory() {
 
     div.innerHTML = `
       <div class="hist-top">
-        <div class="hist-verdict ${esApto ? 'apto' : 'no-apto'}">${h.veredicto} ${h.direccion !== 'NINGUNA' ? h.direccion : ''}</div>
+        <div class="hist-verdict ${esApto ? 'apto' : 'no-apto'}">${h.veredicto} ${h.direccion !== 'NINGUNA' ? h.direccion : ''}${h.calidad ? ' · ' + h.calidad : ''}</div>
         <div class="hist-meta">${h.symbol} · ${fechaStr} ${horaStr}</div>
       </div>
       ${planHtml}
@@ -913,6 +1029,12 @@ function renderJournal() {
     ['Calidad A (TP/SL)', tpsl('A')],
     ['Calidad B (TP/SL)', tpsl('B')]
   ];
+  // TP/SL por patron de llegada (para comprobar con datos si las hipotesis del metodo se cumplen)
+  Object.keys(PATTERN_LABEL).forEach((pt) => {
+    const w = journal.filter((j) => j.patron === pt && j.status === 'TP').length;
+    const l = journal.filter((j) => j.patron === pt && j.status === 'SL').length;
+    if (w + l > 0) stats.push([`${PATTERN_LABEL[pt]} (TP/SL)`, `${w} / ${l}`]);
+  });
   stats.forEach(([label, value]) => {
     const box = el('div', 'stat');
     box.appendChild(el('div', 'stat-value', String(value)));
@@ -932,7 +1054,7 @@ function renderJournal() {
     const fecha = new Date(j.createdAt);
     const fechaStr = fecha.toLocaleDateString('es', { day: '2-digit', month: '2-digit' }) + ' ' +
       fecha.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
-    item.appendChild(el('div', 'hist-meta', `${fechaStr} · ${j.provider || ''} · Calidad ${j.calidad || 'A'}${j.consenso ? ' · ' + j.consenso : ''}`));
+    item.appendChild(el('div', 'hist-meta', `${fechaStr} · ${j.provider || ''} · Calidad ${j.calidad || 'A'}${j.patron ? ' · ' + (PATTERN_LABEL[j.patron] || j.patron) : ''}${j.tipoEntrada === 'mercado' ? ' · a mercado' : ''}${j.origen === 'seguimiento' ? ' · seguimiento' : ''}${j.consenso ? ' · ' + j.consenso : ''}`));
 
     const plan = el('div', 'hist-plan');
     [
@@ -969,12 +1091,13 @@ function exportJournalCsv() {
     setStatus('No hay señales para exportar todavia.', 'error');
     return;
   }
-  const head = ['fecha_local', 'instrumento', 'direccion', 'entrada', 'sl', 'tp', 'rr_plan', 'estado', 'resultado_R', 'ambigua', 'calidad', 'consenso', 'ventana', 'confianza', 'proveedor', 'zona', 'gatillo'];
+  const head = ['fecha_local', 'instrumento', 'direccion', 'entrada', 'sl', 'tp', 'rr_plan', 'estado', 'resultado_R', 'ambigua', 'calidad', 'consenso', 'ventana', 'confianza', 'proveedor', 'zona', 'gatillo', 'patron', 'tipo_entrada', 'faltantes', 'exigencia_dia', 'origen'];
   const q = (v) => '"' + String(v === null || v === undefined ? '' : v).replace(/"/g, '""') + '"';
   const rows = journal.map((j) => [
     new Date(j.createdAt).toLocaleString('es'), j.symbol, j.direccion, j.entry, j.sl, j.tp,
     Math.round(j.rrPlan * 100) / 100, j.status, j.resultR === null ? '' : Math.round(j.resultR * 100) / 100,
-    j.ambigua ? 'si' : 'no', j.calidad || 'A', j.consenso || '', j.windowKey || '', j.confianza, j.provider, j.zona, j.gatillo
+    j.ambigua ? 'si' : 'no', j.calidad || 'A', j.consenso || '', j.windowKey || '', j.confianza, j.provider, j.zona, j.gatillo,
+    j.patron || '', j.tipoEntrada || '', j.faltantes || '', j.estricto || '', j.origen || ''
   ].map(q).join(','));
   const csv = '﻿' + [head.join(','), ...rows].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -1022,68 +1145,206 @@ function notifyApto(result, symbol) {
 // ---------------------------------------------------------------
 let analysisRunning = false;
 
-async function runAnalysis({ silent = false } = {}) {
+// ---------------------------------------------------------------
+// FILTROS FINALES EN CODIGO (se aplican sobre el veredicto de la IA)
+// ---------------------------------------------------------------
+function toNoApto(r, why) {
+  return {
+    ...r, veredicto: 'NO APTO', direccion: 'NINGUNA', calidad: null, tipoEntrada: null, gatillo: null,
+    entrada: null, stopLoss: null, takeProfit: null, rrReal: null, faltantes: null,
+    analisis: `${r.analisis || ''}\n\n[Filtro de codigo] ${why}`, bloqueada: why
+  };
+}
+
+// Exigencia segun el dia (hora de Nueva York): lunes/martes y miercoles por la manana suelen ser acumulacion
+function dayStrictness() {
+  const ny = nowIn('America/New_York');
+  const wd = ny.weekday;
+  if (wd === 1 || wd === 2 || (wd === 0 && ny.minutes >= 17 * 60)) {
+    return { mode: 'soloA', label: 'Lun/Mar: solo calidad A', text: 'EXIGENCIA DEL DIA: lunes/martes (acumulacion habitual). Solo se aceptan setups de calidad A; exige evidencia fuerte de que NO es acumulacion.' };
+  }
+  if (wd === 3 && ny.minutes < 12 * 60) {
+    return { mode: 'Balta', label: 'Mie (mañana): B solo con confianza 7+', text: 'EXIGENCIA DEL DIA: miercoles por la mañana (aun suele ser acumulacion). Las calidad B solo valen con confianza 7 o mas.' };
+  }
+  return { mode: 'normal', label: 'Exigencia normal', text: 'EXIGENCIA DEL DIA: normal (la distribucion suele estar activa).' };
+}
+
+function applyGuards(result, ctx) {
+  const aiPatron = result.patron;
+  let r = { ...result };
+  if (ctx.state) r.patron = ctx.state.pattern; // el patron medido por codigo manda
+  if (r.veredicto !== 'APTO') return r;
+  const dir = r.direccion;
+  const sl = parseFloat(r.stopLoss), tp = parseFloat(r.takeProfit);
+  if (!(dir === 'LONG' || dir === 'SHORT') || !Number.isFinite(sl) || !Number.isFinite(tp)) return r;
+
+  // Pasos 1 y 2 solo para entradas a mercado (el prompt siempre las pide asi; 'limite' queda como compatibilidad)
+  if (r.tipoEntrada === 'mercado') {
+    // 1) No perseguir una vela de confirmacion enorme
+    const nums = window.SMCLevels.toNum(ctx.trigClosed);
+    const a = window.SMCLevels.atr(nums.slice(0, -1));
+    const lc = nums[nums.length - 1];
+    if (a && lc && (lc.h - lc.l) > 2.5 * a) {
+      return toNoApto(r, `la ultima vela cerrada mide ${((lc.h - lc.l) / a).toFixed(1)} x ATR (noticia o inyeccion de capital): no se persigue la entrada.`);
+    }
+
+    // 2) Entrada a mercado = cierre de la ultima vela cerrada del marco de gatillo
+    if (lc) {
+      const entry = lc.c;
+      const raw = ctx.trigClosed[ctx.trigClosed.length - 1].close;
+      const dec = Math.max((String(raw).split('.')[1] || '').length, 2);
+      const okSide = dir === 'LONG' ? (sl < entry && tp > entry) : (sl > entry && tp < entry);
+      if (!okSide) return toNoApto(r, 'con la entrada a mercado (cierre actual) el SL o el TP quedan del lado equivocado: el precio ya se movio.');
+      const rr = Math.abs(tp - entry) / Math.abs(entry - sl);
+      if (rr < 1.95) return toNoApto(r, `con la entrada a mercado el R:R real es ${rr.toFixed(1)}:1 (minimo 2:1): el precio ya se alejo del punto ideal.`);
+      r.tipoEntrada = 'mercado';
+      r.entrada = entry.toFixed(dec);
+      r.rrReal = `${Math.round(rr * 10) / 10}:1`;
+    }
+
+  }
+
+  // 3) Patron de llegada sin barrido final (hipotesis del usuario)
+  if (ctx.state && (ctx.state.pattern === 'dificultad' || ctx.state.pattern === 'zona_en_prueba') && aiPatron !== 'barrido') {
+    return toNoApto(r, `patron de llegada "${ctx.state.pattern}" sin barrido final: se espera el barrido y el cierre de vuelta antes de entrar.`);
+  }
+
+  // 4) Exigencia segun el dia
+  const st = ctx.strict;
+  if (st && st.mode === 'soloA' && r.calidad === 'B') return toNoApto(r, 'calidad B descartada: lunes/martes solo se operan setups A.');
+  if (st && st.mode === 'Balta' && r.calidad === 'B' && !(Number(r.confianza) >= 7)) return toNoApto(r, 'calidad B descartada: el miercoles por la mañana exige confianza 7 o mas.');
+  return r;
+}
+
+// ---------------------------------------------------------------
+// SEGUIMIENTO: cuando solo falta la vela de confirmacion, el codigo vigila el marco de gatillo (1M)
+// y vuelve a llamar a la IA en cuanto una vela cierra con cuerpo mas alla del nivel.
+// ---------------------------------------------------------------
+const WATCH_TTL = 90 * 60 * 1000;
+
+function getWatches() {
+  try { return JSON.parse(localStorage.getItem('watches') || '[]'); } catch (e) { return []; }
+}
+function saveWatches(w) {
+  localStorage.setItem('watches', JSON.stringify(w));
+  if (typeof renderWatch === 'function') renderWatch();
+}
+function addWatch(symbol, sg, zona) {
+  const w = getWatches().filter((x) => x.symbol !== symbol);
+  w.unshift({
+    id: Date.now(), symbol, dir: sg.direccion, nivel: parseFloat(sg.nivel), condicion: sg.condicion || '',
+    zona: zona || '', createdAt: Date.now(), lastT: Date.now() - 60000
+  });
+  saveWatches(w.slice(0, 3));
+}
+function updateWatch(id, patch) {
+  saveWatches(getWatches().map((x) => (x.id === id ? { ...x, ...patch } : x)));
+}
+function removeWatch(id) {
+  saveWatches(getWatches().filter((x) => x.id !== id));
+}
+
+async function watchTick() {
+  const settings = getSettings();
+  if (!settings.twelveKey || analysisRunning) return;
+  let ws = getWatches();
+  const alive = ws.filter((w) => Date.now() - w.createdAt < WATCH_TTL);
+  if (alive.length !== ws.length) { saveWatches(alive); ws = alive; }
+  if (!ws.length || !shouldAnalyzeNow()) return;
+  for (const w of ws.slice(0, 2)) {
+    try {
+      const cs = await fetchCandles(w.symbol, '1min', settings.twelveKey, 40);
+      const c = window.SMCLevels.confirmation(cs, w.nivel, w.dir);
+      if (!c || c.t <= w.lastT) continue;
+      updateWatch(w.id, { lastT: c.t });
+      if (!c.confirmed) continue;
+      removeWatch(w.id);
+      if (c.big) {
+        setStatus(`${w.symbol}: la vela de confirmacion es enorme (${c.rngAtr.toFixed(1)} x ATR), no se persigue.`, '');
+        continue;
+      }
+      const hh = new Date(c.t).toISOString().slice(11, 16) + ' UTC';
+      const note = `CONFIRMACION DETECTADA POR CODIGO: la vela de 1M de las ${hh} cerro con cuerpo ${w.dir === 'LONG' ? 'por encima' : 'por debajo'} de ${w.nivel} (cierre ${c.close}). Verifica que el resto del metodo se cumple; si es asi, la entrada es a mercado en el cierre de esa vela.`;
+      await runAnalysis({ silent: true, symbol: w.symbol, note, origen: 'seguimiento' });
+      break; // una por vuelta para cuidar los creditos
+    } catch (err) {
+      console.log('SMC Copilot vigilancia error:', err);
+    }
+  }
+}
+
+// ---------------------------------------------------------------
+// ANALISIS COMPLETO DE UN INSTRUMENTO
+// ---------------------------------------------------------------
+async function runAnalysis({ silent = false, symbol = null, pre = null, note = '', origen = '' } = {}) {
   const settings = getSettings();
   const hasAnyAiKey = settings.claudeKey || settings.geminiKey || settings.openaiKey || settings.openrouterKey;
   if (!settings.twelveKey || !hasAnyAiKey) {
     if (!silent) setStatus('Configura Twelve Data y al menos una clave de IA primero (icono ⚙).', 'error');
-    return;
+    return null;
   }
   if (analysisRunning) {
     if (!silent) setStatus('Ya hay un analisis en curso, espera a que termine.', '');
-    return;
+    return null;
   }
   analysisRunning = true;
 
-  const symbol = instrumentSelect.value;
+  const sym = symbol || instrumentSelect.value;
+  let outResult = null;
 
   try {
     if (!silent) setStatus('Obteniendo velas...', '');
-    // Las 3 temporalidades se piden en paralelo para no triplicar el tiempo de espera
     // Marco de tiempo elegido (scalping 15M/5M/1M o intradia 1H/15M/5M). Siempre pedimos 130 velas
     // de 1H (~5 dias) para calcular niveles diarios y de sesion; al modelo solo se le mandan las ultimas 60 de cada marco.
+    // "pre" = velas de 15M y 5M ya descargadas por el escaneo de la rotacion (se reutilizan para ahorrar creditos).
     const tfMode = getTfMode();
     const L = TF_MODES[tfMode];
     const key = settings.twelveKey;
     let candles1h, candlesMacro, candlesMid, candlesTrig;
     if (tfMode === 'scalp') {
       [candles1h, candlesMacro, candlesMid, candlesTrig] = await Promise.all([
-        fetchCandles(symbol, '1h', key, 130),
-        fetchCandles(symbol, '15min', key, 100),
-        fetchCandles(symbol, '5min', key, 60),
-        fetchCandles(symbol, '1min', key, 60)
+        fetchCandles(sym, '1h', key, 130),
+        pre ? pre.macro : fetchCandles(sym, '15min', key, 100),
+        pre ? pre.mid : fetchCandles(sym, '5min', key, 60),
+        fetchCandles(sym, '1min', key, 60)
       ]);
     } else {
       [candles1h, candlesMid, candlesTrig] = await Promise.all([
-        fetchCandles(symbol, '1h', key, 130),
-        fetchCandles(symbol, '15min', key, 60),
-        fetchCandles(symbol, '5min', key, 60)
+        fetchCandles(sym, '1h', key, 130),
+        fetchCandles(sym, '15min', key, 60),
+        fetchCandles(sym, '5min', key, 60)
       ]);
       candlesMacro = candles1h;
     }
 
-    // Ventana de trading actual y si hace falta el modo flexible (ninguna señal pasada la mitad de la ventana)
     const winInfo = getWindowInfo();
-    const flexible = needFlexible(winInfo);
+    const strict = dayStrictness();
     const levelsText = window.SMCLevels
       ? window.SMCLevels.buildLevelsText({ h1: candles1h, macro: candlesMacro, mid: candlesMid, trig: candlesTrig, labels: L })
       : '';
-    const promptText = buildMultiTimeframeText(symbol, candlesMacro.slice(-60), candlesMid, candlesTrig, flexible, levelsText, L);
+    const noteAll = [strict.text, note].filter(Boolean).join('\n');
+    const promptText = buildMultiTimeframeText(sym, candlesMacro.slice(-60), candlesMid, candlesTrig, noteAll, levelsText, L);
 
     if (!silent) setStatus('Analizando las 3 temporalidades...', '');
     const statusFn = silent ? null : (msg, type) => setStatus(msg, type);
-    const { result, usedProvider } = consensusEnabled(settings)
+    const { result: aiResult, usedProvider } = consensusEnabled(settings)
       ? await analyzeWithConsensus(promptText, settings, statusFn)
       : await analyzeWithFallback(promptText, settings, statusFn);
 
-    displayResult(result);
-    addToHistory({ ...result, timestamp: Date.now(), symbol });
+    const state = window.SMCLevels ? window.SMCLevels.marketState(candlesMacro, candlesMid) : null;
+    const result = applyGuards(aiResult, { trigClosed: candlesTrig, strict, state });
+    outResult = result;
+
+    displayResult(result, sym);
+    addToHistory({ ...result, timestamp: Date.now(), symbol: sym });
     renderHistory();
     if (winInfo) logWindowAnalysis(winInfo.dayKey);
-    if (addSignalToJournal(result, symbol, usedProvider, winInfo ? winInfo.key : null, flexible, L.evalInterval)) renderJournal();
+    if (addSignalToJournal(result, sym, usedProvider, winInfo ? winInfo.key : null, false, L.evalInterval,
+      { estricto: strict.mode, origen, patron: result.patron })) renderJournal();
+    if (result.veredicto !== 'APTO' && validSeg(result)) addWatch(sym, result.seguimiento, result.zona);
 
     if (result.veredicto === 'APTO') {
-      notifyApto(result, symbol);
+      notifyApto(result, sym);
     }
 
     // Siempre limpiamos/actualizamos el estado (incluso en corridas silenciosas del
@@ -1092,7 +1353,7 @@ async function runAnalysis({ silent = false } = {}) {
     const hora = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
     const esProveedorPrincipal = usedProvider === 'Claude' || usedProvider.startsWith('Consenso') || (usedProvider === 'Gemini' && !settings.claudeKey);
     setStatus(
-      esProveedorPrincipal ? `Analisis completo${result.consenso ? ' (' + result.consenso + ')' : ''} — ${hora}` : `Analisis completo (via ${usedProvider}, respaldo) — ${hora}`,
+      esProveedorPrincipal ? `${sym}: analisis completo${result.consenso ? ' (' + result.consenso + ')' : ''} — ${hora}` : `${sym}: analisis completo (via ${usedProvider}, respaldo) — ${hora}`,
       'success'
     );
   } catch (err) {
@@ -1103,12 +1364,59 @@ async function runAnalysis({ silent = false } = {}) {
     // Siempre revisamos si alguna señal abierta ya llego a su TP o SL (1 credito de Twelve Data por instrumento)
     evaluateOpenSignals();
   }
+  return outResult;
+}
+
+// ---------------------------------------------------------------
+// ROTACION DE INSTRUMENTOS: escaneo barato en CODIGO de todos los instrumentos (15M + 5M);
+// la IA solo analiza el que tiene zona y movimiento (si el oro esta en acumulacion, pasa al siguiente).
+// ---------------------------------------------------------------
+const ROTATION = ['XAU/USD', 'EUR/USD', 'GBP/JPY', 'USD/JPY'];
+const scanState = {};
+
+function rotationOn() {
+  return localStorage.getItem('rotation') !== 'false';
+}
+
+async function scanInstruments(key) {
+  for (const sym of ROTATION) {
+    try {
+      const [m, d] = await Promise.all([fetchCandles(sym, '15min', key, 100), fetchCandles(sym, '5min', key, 60)]);
+      scanState[sym] = { state: window.SMCLevels.marketState(m, d), macro: m, mid: d, at: Date.now(), error: null };
+    } catch (err) {
+      scanState[sym] = { state: null, at: Date.now(), error: err.message || 'error' };
+    }
+    if (typeof renderScan === 'function') renderScan();
+  }
+}
+
+async function runCycle() {
+  const settings = getSettings();
+  if (!settings.twelveKey) return;
+  if (!rotationOn()) { await runAnalysis({ silent: true }); return; }
+  if (analysisRunning) return;
+  await scanInstruments(settings.twelveKey);
+  const cands = ROTATION
+    .map((sym, i) => ({ sym, i, sc: scanState[sym] }))
+    .filter((x) => x.sc && x.sc.state && x.sc.state.pass)
+    .sort((a, b) => (b.sc.state.score - a.sc.state.score) || (a.i - b.i));
+  if (!cands.length) {
+    setStatus('Rotacion: ningun instrumento tiene zona y movimiento ahora (no se gasta IA).', '');
+    return;
+  }
+  // Hasta 2 candidatos por vuelta: el segundo solo si el primero salio NO APTO sin seguimiento
+  for (const c of cands.slice(0, 2)) {
+    if (!shouldAnalyzeNow()) break;
+    const r = await runAnalysis({ silent: true, symbol: c.sym, pre: { macro: c.sc.macro, mid: c.sc.mid }, origen: 'rotacion' });
+    if (r && (r.veredicto === 'APTO' || validSeg(r))) break;
+  }
 }
 
 // ---------------------------------------------------------------
 // MODO AUTOMATICO (setInterval mientras la app este abierta)
 // ---------------------------------------------------------------
 let autoModeTimer = null;
+let watchTimer = null;
 
 // ---------------------------------------------------------------
 // HORARIOS PROGRAMADOS: una o varias ventanas (Desde/Hasta) en la zona
@@ -1194,7 +1502,7 @@ function dateIn(tz) {
 
 function getMaxSignals() {
   const n = Number(localStorage.getItem('maxSignals'));
-  return [1, 2, 3, 5].includes(n) ? n : 3;
+  return [1, 2, 3, 5].includes(n) ? n : 2;
 }
 
 // Dia de trading de las señales: la fecha en la zona horaria de los horarios (o la de tu dispositivo
@@ -1241,13 +1549,6 @@ function quotaReached() {
   return signalsToday(getDayKey()) >= getMaxSignals();
 }
 
-// Minimo 1 señal por dia: solo en la segunda mitad de la ULTIMA ventana del dia, y solo si
-// todavia no hay ninguna, se activa el modo flexible (calidad B). Antes de eso el bot espera
-// setups completos (calidad A): el tope de señales es un limite, no una meta.
-function needFlexible(info) {
-  return !!info && info.idx !== null && info.isLast && info.elapsedFrac >= 0.5 && signalsToday(info.dayKey) < 1;
-}
-
 // Cuantos analisis se hicieron cada dia (para saber en cuantos dias hubo y no hubo señal)
 function logWindowAnalysis(key) {
   let log = {};
@@ -1262,8 +1563,30 @@ function getWindowLog() {
   try { return JSON.parse(localStorage.getItem('windowLog') || '{}'); } catch (e) { return {}; }
 }
 
+// Noticias fuertes del dia (se escriben a mano, hora de Nueva York): el bot no analiza 15 min antes ni despues
+function getNewsText() {
+  try {
+    const n = JSON.parse(localStorage.getItem('news') || 'null');
+    if (n && n.day === dateIn('America/New_York')) return n.text || '';
+  } catch (e) { /* sin noticias */ }
+  return '';
+}
+
+function newsBlackout() {
+  const txt = getNewsText();
+  if (!txt) return null;
+  const nowMin = nowIn('America/New_York').minutes;
+  for (const line of txt.split('\n')) {
+    const m = /(\d{1,2}):(\d{2})/.exec(line);
+    if (!m) continue;
+    const t = Number(m[1]) * 60 + Number(m[2]);
+    if (nowMin >= t - 15 && nowMin <= t + 15) return line.trim();
+  }
+  return null;
+}
+
 function shouldAnalyzeNow() {
-  return isMarketOpen() && isWithinActiveHours() && !quotaReached();
+  return isMarketOpen() && isWithinActiveHours() && !quotaReached() && !newsBlackout();
 }
 
 function renderScheduleUI() {
@@ -1292,19 +1615,21 @@ function renderScheduleUI() {
 
 function updateAutoModeHint() {
   renderScheduleUI();
+  if (typeof renderToday === 'function' && typeof todayCount !== 'undefined' && todayCount) { renderToday(); updateClock(); renderNewsHint(); }
   if (!autoModeToggle.checked) {
     autoModeHint.textContent = 'Apagado. Analiza manualmente con el boton de abajo.';
     return;
   }
-  const info = getWindowInfo();
   const max = getMaxSignals();
   const n = signalsToday(getDayKey());
-  const meta = ` Señales hoy: ${n}/${max}${needFlexible(info) ? ' (modo flexible activo)' : ''}.`;
-  const base = `Activo — analizando ${instrumentSelect.value} cada ${intervalSelect.value} minutos.${meta}`;
+  const meta = ` Señales hoy: ${n}/${max}.`;
+  const base = `Activo — ${rotationOn() ? 'rotacion de instrumentos' : 'analizando ' + instrumentSelect.value} cada ${intervalSelect.value} minutos.${meta}`;
   if (n >= max) {
     autoModeHint.textContent = `${base} Tope del dia alcanzado: en pausa hasta manana.`;
   } else if (!isMarketOpen()) {
     autoModeHint.textContent = `${base} Mercado cerrado ahora: en pausa hasta que abra.`;
+  } else if (newsBlackout()) {
+    autoModeHint.textContent = `${base} Pausa por noticia: ${newsBlackout()}.`;
   } else if (schedule.on) {
     const rangos = schedule.windows.map((w) => `${w.start}-${w.end}`).join(' y ') || '(sin horarios)';
     const zona = TZ_NAMES[schedule.tz] || schedule.tz;
@@ -1323,9 +1648,11 @@ async function startAutoMode() {
   }
   if (autoModeTimer) clearInterval(autoModeTimer);
   const minutes = Number(intervalSelect.value);
+  if (watchTimer) clearInterval(watchTimer);
+  watchTimer = setInterval(watchTick, 60 * 1000); // vigila la confirmacion en 1M cada minuto
   autoModeTimer = setInterval(() => {
     if (shouldAnalyzeNow()) {
-      runAnalysis({ silent: true });
+      runCycle();
     } else {
       // Aunque no toque analizar, igual revisamos si alguna señal abierta ya se resolvio
       evaluateOpenSignals();
@@ -1335,7 +1662,7 @@ async function startAutoMode() {
   localStorage.setItem('autoModeOn', 'true');
   localStorage.setItem('autoModeInterval', String(minutes));
   if (shouldAnalyzeNow()) {
-    runAnalysis({ silent: true }); // primer analisis inmediato, solo si ya estamos en horario
+    runCycle(); // primer analisis inmediato, solo si ya estamos en horario
   }
   updateAutoModeHint();
 }
@@ -1343,6 +1670,8 @@ async function startAutoMode() {
 function stopAutoMode() {
   if (autoModeTimer) clearInterval(autoModeTimer);
   autoModeTimer = null;
+  if (watchTimer) clearInterval(watchTimer);
+  watchTimer = null;
   localStorage.setItem('autoModeOn', 'false');
   updateAutoModeHint();
 }
@@ -1425,6 +1754,121 @@ maxSignalsSelect.addEventListener('change', () => {
   localStorage.setItem('maxSignals', maxSignalsSelect.value);
   updateAutoModeHint();
 });
+
+
+// ---------------------------------------------------------------
+// PANEL: reloj, hoy, escaneo, vigilancia, creditos, noticias, pestañas
+// ---------------------------------------------------------------
+const WD_ES = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
+
+function updateClock() {
+  const ny = nowIn('America/New_York');
+  const hh = String(Math.floor(ny.minutes / 60)).padStart(2, '0');
+  const mm = String(ny.minutes % 60).padStart(2, '0');
+  nyClock.textContent = `NY ${WD_ES[ny.weekday]} ${hh}:${mm}`;
+  const open = isMarketOpen();
+  marketPill.textContent = open ? 'Mercado abierto' : 'Mercado cerrado';
+  marketPill.className = 'pill ' + (open ? 'pill-on' : 'pill-off');
+  sessionLabelEl.textContent = window.SMCLevels ? window.SMCLevels.sessionLabel(Date.now()) : '';
+  const st = dayStrictness();
+  strictHint.textContent = st.label;
+  strictHint.className = 'chip ' + (st.mode === 'normal' ? 'chip-a' : 'chip-b');
+}
+
+function renderCredits() {
+  let n = 0;
+  try {
+    const c = JSON.parse(localStorage.getItem('tdCredits') || 'null');
+    if (c && c.day === new Date().toISOString().slice(0, 10)) n = c.n;
+  } catch (e) { /* sin datos */ }
+  creditsChip.textContent = `${n}/800 créditos hoy`;
+  creditsChip.classList.toggle('chip-b', n > 600);
+}
+
+function renderToday() {
+  const max = getMaxSignals();
+  const n = signalsToday(getDayKey());
+  todayCount.textContent = `${n}/${max}`;
+  todayPips.innerHTML = '';
+  for (let i = 0; i < max; i++) todayPips.appendChild(el('span', 'pip' + (i < n ? ' on' : '')));
+}
+
+function renderScan() {
+  scanList.innerHTML = '';
+  ROTATION.forEach((sym) => {
+    const sc = scanState[sym];
+    const row = el('div', 'scan-row');
+    row.appendChild(el('div', 'scan-sym', sym));
+    let label = 'sin escanear', cls = 'chip-n', detail = '';
+    if (sc && sc.error) { label = 'error'; cls = 'chip-b'; detail = sc.error; }
+    else if (sc && sc.state) {
+      const st = sc.state;
+      if (st.accumulation) { label = 'Acumulación'; cls = 'chip-n'; }
+      else if (st.pass) { label = st.sweep ? 'Barrido' : 'En zona'; cls = 'chip-a'; }
+      else { label = 'Lejos de zona'; cls = 'chip-n'; }
+      detail = st.reason + (st.level && st.pass ? ` · ${PATTERN_LABEL[st.pattern]}` : '');
+    }
+    row.appendChild(el('span', 'chip ' + cls, label));
+    const d = el('div', 'scan-detail', detail);
+    row.appendChild(d);
+    if (sc && sc.state && sc.state.pass) {
+      const bar = el('div', 'scan-bar');
+      const fill = el('span');
+      fill.style.width = Math.min(100, Math.round(sc.state.score / 4 * 100)) + '%';
+      bar.appendChild(fill);
+      row.appendChild(bar);
+    }
+    scanList.appendChild(row);
+  });
+}
+
+function renderWatch() {
+  const ws = getWatches();
+  watchList.innerHTML = '';
+  watchList.classList.toggle('hidden', ws.length === 0);
+  ws.forEach((w) => {
+    const mins = Math.max(0, Math.round((WATCH_TTL - (Date.now() - w.createdAt)) / 60000));
+    const row = el('div', 'watch-row');
+    row.appendChild(el('span', 'watch-eye', '👁'));
+    row.appendChild(el('span', 'watch-txt', `${w.symbol} ${w.dir}: vigilando 1M ${w.dir === 'LONG' ? 'sobre' : 'bajo'} ${w.nivel} (${mins} min)`));
+    const x = el('button', 'icon-btn small', '✕');
+    x.type = 'button'; x.title = 'Dejar de vigilar';
+    x.addEventListener('click', () => removeWatch(w.id));
+    row.appendChild(x);
+    watchList.appendChild(row);
+  });
+}
+
+function renderNewsHint() {
+  const b = newsBlackout();
+  newsHint.textContent = b ? `⏸ Pausa por noticia: ${b}` : (getNewsText() ? 'El bot se pausa 15 min antes y 15 min despues de cada hora.' : 'Opcional. Ej.: 08:30 NFP');
+}
+
+newsInput.value = getNewsText();
+newsInput.addEventListener('change', () => {
+  localStorage.setItem('news', JSON.stringify({ day: dateIn('America/New_York'), text: newsInput.value }));
+  renderNewsHint();
+  updateAutoModeHint();
+});
+
+rotationToggle.checked = rotationOn();
+rotationToggle.addEventListener('change', () => {
+  localStorage.setItem('rotation', rotationToggle.checked ? 'true' : 'false');
+  updateAutoModeHint();
+});
+
+// Pestañas: Panel / Diario
+const tabs = { home: document.getElementById('paneHome'), journal: document.getElementById('paneJournal') };
+document.querySelectorAll('.tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    Object.entries(tabs).forEach(([k, pane]) => pane.classList.toggle('hidden', k !== btn.dataset.tab));
+    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b === btn));
+    window.scrollTo(0, 0);
+  });
+});
+
+setInterval(() => { updateClock(); renderToday(); renderWatch(); renderNewsHint(); }, 15000);
+updateClock(); renderCredits(); renderToday(); renderScan(); renderWatch(); renderNewsHint();
 
 // ---------------------------------------------------------------
 // MANTENER PANTALLA ENCENDIDA (Screen Wake Lock)
